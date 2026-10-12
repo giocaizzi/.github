@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit or apply ../standard. Usage: sync.sh audit [repo ...] | sync.sh apply <settings|labels|ruleset> [repo ...]
+# Audit or apply ../standard. Usage: sync.sh audit [repo ...] | sync.sh apply <settings|labels|workflows|ruleset> [repo ...]
 # `audit` is read-only. Default scope: every non-fork, non-archived repo of the owner.
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
 set -euo pipefail
@@ -7,7 +7,7 @@ OWNER=${OWNER:-giocaizzi}
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 
 mode=${1:-}
-case $mode in audit) ;; apply) what=${2:?settings|labels|ruleset}; shift ;; *) echo "usage: $0 audit|apply ..." >&2; exit 2 ;; esac
+case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|ruleset}; shift ;; *) echo "usage: $0 audit|apply ..." >&2; exit 2 ;; esac
 shift
 repos=("$@")
 [ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
@@ -30,6 +30,23 @@ if [ "$mode" = apply ]; then
           n=$(sed -E 's/^- \{name: "?([^",]+)"?,.*/\1/' <<<"$l"); c=$(sed -E 's/.*color: "?([0-9a-fA-F]+)"?,.*/\1/' <<<"$l"); d=$(sed -E 's/.*description: "([^"]*)"\}.*/\1/' <<<"$l")
           gh label create "$n" --color "$c" --description "$d" --force -R "$OWNER/$r" >/dev/null
         done <<<"$yq_names" ;;
+      workflows)
+        # Opens a PR adding/updating standard/workflows/* on a `chore/standard-workflows` branch. Merge it, then apply the ruleset.
+        base=$(gh api "repos/$OWNER/$r" -q .default_branch)
+        sha=$(gh api "repos/$OWNER/$r/git/ref/heads/$base" -q .object.sha)
+        branch=chore/standard-workflows
+        gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
+        changed=0
+        for f in "$DIR"/standard/workflows/*.yml; do
+          path=.github/workflows/$(basename "$f")
+          cur=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -q .sha 2>/dev/null || true)
+          [ "$cur" = "$(git hash-object "$f")" ] && continue
+          gh api -X PUT "repos/$OWNER/$r/contents/$path" -f branch="$branch" -f message="ci: add standard $(basename "$f")" \
+            -f content="$(base64 < "$f" | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
+          changed=1
+        done
+        [ $changed = 1 ] && gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "ci: add standard workflows" \
+          --body "Adds the standard workflows from giocaizzi/.github (\`standard/workflows/\`), e.g. the required \`Validate PR title\` check." >/dev/null 2>&1 || true ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
@@ -60,6 +77,10 @@ for r in "${repos[@]}"; do
   if [ "$(jq -r .private <<<"$s")" = false ]; then
     gh api "repos/$OWNER/$r/rulesets" -q '.[].name' | grep -qx main || out+=("ruleset main: missing")
   fi
+  for f in "$DIR"/standard/workflows/*.yml; do
+    got=$(gh api "repos/$OWNER/$r/contents/.github/workflows/$(basename "$f")" -q .sha 2>/dev/null || true)
+    [ "$got" = "$(git hash-object "$f")" ] || out+=("workflow drift: $(basename "$f")")
+  done
   have=$(gh label list -R "$OWNER/$r" --limit 200 --json name -q '.[].name')
   while IFS= read -r l; do grep -qxF "$l" <<<"$have" || out+=("label missing: $l"); done <<<"$want_labels"
   if [ ${#out[@]} -eq 0 ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; printf '        %s\n' "${out[@]}"; fi
