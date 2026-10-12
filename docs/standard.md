@@ -3,7 +3,7 @@
 Applies to all non-fork, non-archived repositories of `giocaizzi`. Reference implementation: `giocaizzi/greenhouse`. Machine-readable parts live in `standard/`. `scripts/sync.sh audit` checks every rule below (see [Audit](#audit)).
 
 ## New repos
-Start from `giocaizzi/template`, add the repo to `standard/repos.yaml` here (type, released) and run `make onboard REPO=<name>` (runbook: [runbook-rollout.md](runbook-rollout.md)). Nothing in GitHub applies this standard automatically on a personal account; the weekly audit flags any repo that skipped it.
+Start from `giocaizzi/template` and run `make onboard REPO=<name> TYPE=<type> [FLAGS=...]`, which sets the repo's [topics](#repo-types-topics) and applies the standard (runbook: [runbook-rollout.md](runbook-rollout.md)). Nothing in GitHub applies this standard automatically on a personal account; the weekly audit flags any repo that skipped it.
 
 ## Pull requests
 - `main` changes only through a PR that passed CI; no bypass actors, no force-push, no deletion.
@@ -35,7 +35,7 @@ Type (bug, enhancement, documentation, question, wontfix, duplicate), priority P
 - Python tooling is `uv` only; no poetry.
 
 ## Bots
-Scheduled bots never push to the default branch. They write to a fixed branch, open a PR with a Conventional Commit title and arm auto-merge, authenticated with the release-please GitHub App token (`RP_APP_ID` / `RP_APP_KEY` secrets, `actions/create-github-app-token`) so CI runs on the PR; `GITHUB_TOKEN` PRs do not trigger workflows. Reference: `btc-cycles` `.github/workflows/run.yml`. Known exceptions, listed in `standard/ruleset-exceptions.txt` when public: `giocaizzi` (profile README; the daily stats bot pushes `main` directly, so the repo has no `main` ruleset) and `wiki` (Obsidian sync from desktop/mobile pushes `main` directly; private, so no ruleset on the free plan anyway).
+Scheduled bots never push to the default branch. They write to a fixed branch, open a PR with a Conventional Commit title and arm auto-merge, authenticated with the release-please GitHub App token (`RP_APP_ID` / `RP_APP_KEY` secrets, `actions/create-github-app-token`) so CI runs on the PR; `GITHUB_TOKEN` PRs do not trigger workflows. Reference: `btc-cycles` `.github/workflows/run.yml`. Known exceptions, listed in `standard/ruleset-exceptions.txt` when public: `giocaizzi` (profile README; the daily stats bot pushes `main` directly, so the repo has no `main` ruleset). A private repo whose bot or app sync pushes `main` directly needs no entry: private repos have no ruleset on the free plan.
 
 ## Coverage
 Coverage is reporting, never a gate: the only required checks are `check` and `Validate PR title`. Repos that upload to Codecov ship a `codecov.yml` with `informational: true` for project and patch statuses.
@@ -66,23 +66,23 @@ Environments and environment secrets are available on public repos on every plan
 ## Per-repo docs
 Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink to it, tracked as a git symlink) and `docs/`; this standard is linked, not copied.
 
-## Repo types (`standard/repos.yaml`)
-Every in-scope repo is listed with `type` (`python`, `typescript`, `infra`, `config`, `docs`) and `released` (ships versioned releases). The type decides which typed rules apply. Optional flags: `pypi: true` (published on PyPI) and `deploys: true` (has publish/deploy jobs) switch on the checks in [Environments and publishing](#environments-and-publishing).
+## Repo types (topics)
+Each repo carries its metadata as GitHub topics, so no list of repos lives here: exactly one `std-<type>` (`std-python`, `std-typescript`, `std-infra`, `std-config`, `std-docs`), plus the flags `std-released` (ships versioned releases), `std-pypi` (published on PyPI) and `std-deploys` (has publish/deploy jobs), and `std-exception-<check>` for a documented [exception](#exceptions) (check id with `-` for `_`, e.g. `std-exception-claude-symlink`). The type decides which typed rules apply; `std-pypi` and `std-deploys` switch on the checks in [Environments and publishing](#environments-and-publishing). `make onboard` sets them; change them with `gh repo edit giocaizzi/<repo> --add-topic|--remove-topic`. `scripts/meta.jq` parses them.
 
 ## Audit
 `scripts/sync.sh audit` reports three kinds of checks; standard and typed failures are drift (exit 1), extras never are.
-- **Standard** (every repo): listed in `repos.yaml`; `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` + `CLAUDE.md` symlink; squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
+- **Standard** (every repo): exactly one `std-<type>` topic (`repo_type`); `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` + `CLAUDE.md` symlink; squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
 - **Typed** (when applicable): tests (python, typescript); `uv.lock` + ruff + mypy + pytest (python); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released); `informational: true` (when `codecov.yml` exists); `environments` and `pypi_publish` (public repos only).
   - `environments` (`deploys: true` or `pypi: true`): every job in `.github/workflows/*.yml` with a publish/deploy step declares `environment:`. A step counts as publish/deploy when the job contains `gh-action-pypi-publish`, `uv publish`, `docker push`, `deploy-pages`, `cosign sign`, `wrangler deploy`, a `/webhooks/` call, `scp`/`rsync`/`ssh`, or `docker/build-push-action` with `push: true`. Repository secrets named like `PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER` also fail it (names only).
   - `pypi_publish` (`pypi: true`): `release-please-config.json` plus a workflow that publishes with `pypa/gh-action-pypi-publish` or `uv publish`, `id-token: write`, no token, `environment: pypi`, triggered by `release:` or a release-please output.
 - **Extras** (presence only): pre-commit, CODEOWNERS, changelog, Dockerfile, live docs site (GitHub Pages or a homepage URL), plus tests, Terraform and `LICENSE` where not required.
 
-`--json` emits one object per repo (checks, extras, exemptions, scores); the weekly audit uploads it as the `audit` artifact.
+`--json` emits one object per repo (checks, extras, exemptions, scores). `--visibility public|private|all` (default `all`) limits the scope. This repo is public, so its weekly audit runs `--visibility public` and its `audit` artifact and `drift` issue cover public repos only; private repos are audited locally (the owner's dashboard runs `sync.sh audit --json --visibility private` with the owner's `gh` login), so nothing about them is stored on GitHub, and no private repo is named here.
 
 ## Exceptions
-- `giocaizzi` (profile bot) and `wiki` (Obsidian sync) push `main` directly: no `main` ruleset (see [Bots](#bots)).
+- `giocaizzi` (profile bot) pushes `main` directly: no `main` ruleset (see [Bots](#bots)).
 - Private repos on the free plan: no ruleset, auto-merge or secret scanning (see below); the audit lists those checks under `exempt`.
-- `rp5-homeserver`: Portainer rejects tracked symlinks, so `CLAUDE.md` is an untracked local symlink and `.gitignore` lists `/CLAUDE.md`; the audit accepts `AGENTS.md` + that entry (`exceptions: [claude_symlink]` in `repos.yaml`).
+- `rp5-homeserver`: Portainer rejects tracked symlinks, so `CLAUDE.md` is an untracked local symlink and `.gitignore` lists `/CLAUDE.md`; the audit accepts `AGENTS.md` + that entry (topic `std-exception-claude-symlink`).
 
 ## Private repos on the free plan
 Rulesets, branch protection, auto-merge and secret scanning are unavailable (GitHub returns 403/422). Private repos keep everything else: squash-only, delete-on-merge, labels, a `check` CI job with gitleaks, and the PR-only convention enforced by `AGENTS.md`. Moving to GitHub Pro or making a repo public lifts this; then rerun `sync.sh apply`.

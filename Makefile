@@ -8,16 +8,17 @@ lint: ## shellcheck scripts, validate JSON
 	shellcheck scripts/*.sh
 	jq empty standard/*.json
 
-test: ## Smoke-test: the audit script and standard/repos.yaml parse
+test: ## Smoke-test: the audit script parses, the topic parser reads type and flags
 	bash -n scripts/sync.sh
-	grep -E '^- \{' standard/repos.yaml | sed -E 's/^- //; s/([A-Za-z0-9_.-]+)/"\1"/g' \
-	  | jq -se 'all(.[]; (.type | IN("python","typescript","infra","config","docs")) and (.released | IN("true","false")) and all(.pypi, .deploys; . == null or . == "true"))' >/dev/null
+	echo '{"topics":["gis","std-python","std-released","std-exception-claude-symlink"]}' | jq -ef scripts/meta.jq \
+	  | jq -e '.type == "python" and .released and (.pypi | not) and .exceptions == ["claude_symlink"]' >/dev/null
+	echo '{"topics":["std-python","std-docs"]}' | jq -ef scripts/meta.jq | jq -e '.type == "unknown"' >/dev/null
 
 check: lint test ## lint + test
 
-audit: ## Report drift of all repos (read-only); JSON=1 prints JSON on stdout, text on stderr
-	@scripts/sync.sh audit $(if $(JSON),--json)
+audit: ## Report drift (read-only); JSON=1 prints JSON on stdout, text on stderr; VISIBILITY=public|private|all (default all)
+	@scripts/sync.sh audit $(if $(JSON),--json) --visibility $(or $(VISIBILITY),all)
 
-onboard: ## Apply the standard to a new repo: make onboard REPO=<name>
-	@test -n "$(REPO)" || { echo "usage: make onboard REPO=<name>"; exit 2; }
-	scripts/sync.sh onboard $(REPO)
+onboard: ## Apply the standard to a new repo: make onboard REPO=<name> TYPE=<type> [FLAGS=released,pypi]
+	@test -n "$(REPO)" -a -n "$(TYPE)" || { echo "usage: make onboard REPO=<name> TYPE=<type> [FLAGS=released,pypi,deploys]"; exit 2; }
+	scripts/sync.sh onboard $(REPO) $(TYPE) $(FLAGS)
