@@ -216,6 +216,7 @@ for r in "${repos[@]}"; do
   chk pre_commit extra "$(ok has '\.pre-commit-config\.ya?ml')"
   chk codeowners extra "$(ok has '(\.github/|docs/)?CODEOWNERS')"
   chk changelog extra "$(ok has '(.*/)?CHANGELOG\.md')"
+  chk docs_site extra "$(jq -r '.has_pages or ((.homepage // "") != "")' <<<"$s")"
 
   fails=$(awk -F'\t' '$2!="extra" && $3=="false" {print $1": "$4}' <<<"$rec")
   if [ -z "$fails" ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; while IFS= read -r l; do printf '        %s\n' "$l"; done <<<"$fails"; fi

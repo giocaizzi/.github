@@ -59,7 +59,7 @@ Every in-scope repo is listed with `type` (`python`, `typescript`, `infra`, `con
 `scripts/sync.sh audit` reports three kinds of checks; standard and typed failures are drift (exit 1), extras never are.
 - **Standard** (every repo): listed in `repos.yaml`; `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` + `CLAUDE.md` symlink; squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
 - **Typed** (when applicable): tests (python, typescript); `uv.lock` + ruff + mypy + pytest (python); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released); `informational: true` (when `codecov.yml` exists).
-- **Extras** (presence only): pre-commit, CODEOWNERS, changelog, Dockerfile, plus tests, Terraform and `LICENSE` where not required.
+- **Extras** (presence only): pre-commit, CODEOWNERS, changelog, Dockerfile, live docs site (GitHub Pages or a homepage URL), plus tests, Terraform and `LICENSE` where not required.
 
 `--json` emits one object per repo (checks, extras, exemptions, scores); the weekly audit uploads it as the `audit` artifact.
 
