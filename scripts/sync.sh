@@ -82,7 +82,13 @@ for r in "${repos[@]}"; do
     [ "$got" = enabled ] || out+=("$k: $got (want enabled)")
   done
   if [ "$(jq -r .private <<<"$s")" = false ]; then
-    gh api "repos/$OWNER/$r/rulesets" -q '.[].name' | grep -qx main || out+=("ruleset main: missing")
+    id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
+    if [ -z "$id" ]; then out+=("ruleset main: missing")
+    else
+      want=$(jq -r '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context' "$DIR/standard/ruleset-main.json" | sort)
+      got=$(gh api "repos/$OWNER/$r/rulesets/$id" -q '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context' | sort)
+      [ "$want" = "$got" ] || out+=("ruleset main: required checks $(echo "$got" | paste -sd, -) (want $(echo "$want" | paste -sd, -))")
+    fi
   fi
   for f in "$DIR"/standard/workflows/*.yml; do
     got=$(gh api "repos/$OWNER/$r/contents/.github/workflows/$(basename "$f")" -q .sha 2>/dev/null || true)

@@ -31,6 +31,15 @@ Type (bug, enhancement, documentation, question, wontfix, duplicate), priority P
 - Releases via release-please with a GitHub App token (so the release PR triggers CI). Tags `v*`.
 - Python tooling is `uv` only; no poetry.
 
+## Bots
+Scheduled bots never push to the default branch. They write to a fixed branch, open a PR with a Conventional Commit title and arm auto-merge, authenticated with the release-please GitHub App token (`RP_APP_ID` / `RP_APP_KEY` secrets, `actions/create-github-app-token`) so CI runs on the PR; `GITHUB_TOKEN` PRs do not trigger workflows. Reference: `btc-cycles` `.github/workflows/run.yml`. Known exception: `wiki` Obsidian sync from desktop/mobile pushes `main` directly (private repo, no ruleset on the free plan).
+
+## Coverage
+Coverage is reporting, never a gate: the only required checks are `check` and `Validate PR title`. Repos that upload to Codecov ship a `codecov.yml` with `informational: true` for project and patch statuses.
+
+## Tests that cannot run in CI
+Tests that need the network or live data get a `network` pytest marker and are deselected by `make test`; tests broken by upstream drift become `xfail(strict=True)` with a reason pointing at a tracking issue. Never merge a red `check`.
+
 ## Security
 Secret scanning + push protection on every public repo (private repos need GHAS, so they skip it); CI adds gitleaks on all. Security policy in `SECURITY.md` (inherited from this repo).
 
