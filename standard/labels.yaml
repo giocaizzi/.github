@@ -1,0 +1,20 @@
+# Canonical label set. `sync.sh apply labels` creates/updates these; it never deletes extras.
+# Type
+- {name: bug, color: d73a4a, description: "Something isn't working"}
+- {name: enhancement, color: a2eeef, description: "New feature or request"}
+- {name: documentation, color: 0075ca, description: "Improvements or additions to documentation"}
+- {name: question, color: d876e3, description: "Further information is requested"}
+- {name: wontfix, color: ffffff, description: "This will not be worked on"}
+- {name: duplicate, color: cfd3d7, description: "This issue or pull request already exists"}
+# Priority
+- {name: P1, color: b60205, description: "Do first: blocks shipping or a known risk"}
+- {name: P2, color: d93f0b, description: "Important, next up"}
+- {name: P3, color: fbca04, description: "Nice to have"}
+# Cross-cutting
+- {name: parity, color: 0e8a16, description: "Gap between harnesses (Claude Code, Copilot CLI) or hosts (macOS, Linux, Windows)"}
+# Automation (Dependabot, release-please)
+- {name: dependencies, color: 0366d6, description: "Pull requests that update a dependency file"}
+- {name: github_actions, color: "000000", description: "Pull requests that update GitHub Actions code"}
+- {name: "python:uv", color: 2b67c6, description: "Pull requests that update python:uv code"}
+- {name: "autorelease: pending", color: ededed, description: "release-please: release PR open"}
+- {name: "autorelease: tagged", color: ededed, description: "release-please: tagged release"}
