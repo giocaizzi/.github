@@ -1,9 +1,9 @@
 # GitHub standard
 
-Applies to all non-fork, non-archived repositories of `giocaizzi`. Reference implementation: `giocaizzi/greenhouse`. Machine-readable parts live in `standard/`.
+Applies to all non-fork, non-archived repositories of `giocaizzi`. Reference implementation: `giocaizzi/greenhouse`. Machine-readable parts live in `standard/`. `scripts/sync.sh audit` checks every rule below (see [Audit](#audit)).
 
 ## New repos
-Start from `giocaizzi/template` and run `make onboard REPO=<name>` (runbook: [runbook-rollout.md](runbook-rollout.md)). Nothing in GitHub applies this standard automatically on a personal account; the weekly audit flags any repo that skipped it.
+Start from `giocaizzi/template`, add the repo to `standard/repos.yaml` here (type, released) and run `make onboard REPO=<name>` (runbook: [runbook-rollout.md](runbook-rollout.md)). Nothing in GitHub applies this standard automatically on a personal account; the weekly audit flags any repo that skipped it.
 
 ## Pull requests
 - `main` changes only through a PR that passed CI; no bypass actors, no force-push, no deletion.
@@ -24,7 +24,7 @@ Who wrote a change must survive the squash, so attribution lives in the PR descr
 Default-branch rules: PR required (squash), up-to-date branch, required status checks `check` and `Validate PR title`, no deletion or force-push. `check` is one aggregate CI job (`needs: [...]`, `if: always()`) so job renames never touch the ruleset. No merge queue on user-owned repos (not offered); strict up-to-date checks plus auto-merge replace it.
 
 ## Repo settings (`standard/repo-settings.json`)
-Squash only, auto-merge, delete-branch-on-merge, secret scanning and push protection on. Dependabot updates configured per repo (`.github/dependabot.yml`: ecosystem + `github-actions`).
+Squash only, auto-merge, delete-branch-on-merge, secret scanning and push protection, private vulnerability reporting (the last four on public repos only). Dependabot updates configured per repo (`.github/dependabot.yml`: ecosystem + `github-actions`).
 
 ## Labels (`standard/labels.yaml`)
 Type (bug, enhancement, documentation, question, wontfix, duplicate), priority P1–P3, `parity`, and the automation labels Dependabot and release-please create. Only standard labels may exist: `sync.sh apply labels` deletes extras and the `label-guard` workflow (`standard/workflows/label-guard.yml`) deletes a non-standard label as soon as it is created or renamed. To add a label, change `standard/labels.yaml` here first. GitHub cannot block label creation natively.
@@ -44,10 +44,29 @@ Coverage is reporting, never a gate: the only required checks are `check` and `V
 Tests that need the network or live data get a `network` pytest marker and are deselected by `make test`; tests broken by upstream drift become `xfail(strict=True)` with a reason pointing at a tracking issue. Never merge a red `check`.
 
 ## Security
-Secret scanning + push protection on every public repo (private repos need GHAS, so they skip it); CI adds gitleaks on all. Security policy in `SECURITY.md` (inherited from this repo).
+Secret scanning + push protection on public repos only (private repos need GHAS); CI runs gitleaks on all. `SECURITY.md` (report through GitHub private vulnerability reporting, enabled on public repos) and the issue forms in `.github/ISSUE_TEMPLATE/` (bug, feature) live in this repo and are inherited by every repo as community health defaults; a repo's own file replaces them.
+
+## License
+Every public repo has a `LICENSE` (MIT unless stated otherwise).
 
 ## Per-repo docs
-Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink) and `docs/`; this standard is linked, not copied.
+Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink to it, tracked as a git symlink) and `docs/`; this standard is linked, not copied.
+
+## Repo types (`standard/repos.yaml`)
+Every in-scope repo is listed with `type` (`python`, `typescript`, `infra`, `config`, `docs`) and `released` (ships versioned releases). The type decides which typed rules apply.
+
+## Audit
+`scripts/sync.sh audit` reports three kinds of checks; standard and typed failures are drift (exit 1), extras never are.
+- **Standard** (every repo): listed in `repos.yaml`; `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot; `AGENTS.md` + `CLAUDE.md` symlink; squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
+- **Typed** (when applicable): tests (python, typescript); `uv.lock` + ruff + mypy + pytest (python); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released); `informational: true` (when `codecov.yml` exists).
+- **Extras** (presence only): pre-commit, CODEOWNERS, changelog, Dockerfile, plus tests, Terraform and `LICENSE` where not required.
+
+`--json` emits one object per repo (checks, extras, exemptions, scores); the weekly audit uploads it as the `audit` artifact.
+
+## Exceptions
+- `giocaizzi` (profile bot) and `wiki` (Obsidian sync) push `main` directly: no `main` ruleset (see [Bots](#bots)).
+- Private repos on the free plan: no ruleset, auto-merge or secret scanning (see below); the audit lists those checks under `exempt`.
+- `rp5-homeserver`: Portainer rejects tracked symlinks, so `CLAUDE.md` is an untracked local symlink and `.gitignore` lists `/CLAUDE.md`; the audit accepts `AGENTS.md` + that entry (`exceptions: [claude_symlink]` in `repos.yaml`).
 
 ## Private repos on the free plan
 Rulesets, branch protection, auto-merge and secret scanning are unavailable (GitHub returns 403/422). Private repos keep everything else: squash-only, delete-on-merge, labels, a `check` CI job with gitleaks, and the PR-only convention enforced by `AGENTS.md`. Moving to GitHub Pro or making a repo public lifts this; then rerun `sync.sh apply`.
