@@ -5,7 +5,7 @@ Applies to all non-fork, non-archived repositories of `giocaizzi`. Reference imp
 ## Pull requests
 - `main` changes only through a PR that passed CI; no bypass actors, no force-push, no deletion.
 - Squash merge only. The squash commit is built from the PR, never from branch commits: title = PR title (`squash_merge_commit_title: PR_TITLE`), body = PR description (`squash_merge_commit_message: PR_BODY`). Branch commit messages are history only.
-- PR title is a Conventional Commit header, `type(scope): lowercase description`; it is the commit on `main` and drives release-please. Required check `Validate PR title` (`standard/workflows/pr-title.yml`) enforces it in CI; the agent-mods title guard enforces it before `gh pr create` / `git commit` run.
+- PR title is a Conventional Commit header, `type(scope): lowercase description`; it is the commit on `main` and drives release-please. Required check `Validate PR title` (`standard/workflows/pr-title.yml`) enforces it in CI; the `guard` plugin of `giocaizzi/harness` enforces it before `gh pr create` / `git commit` run.
 - PR description follows `.github/PULL_REQUEST_TEMPLATE.md` (What / Why / Verification), then footers as plain trailing lines: `BREAKING CHANGE:`, `Refs:`, attribution.
 - Auto-merge on; branch deleted on merge. Stacked PRs with `gh stack` for layered work.
 - Review threads must be resolved; approvals 0 while solo.
