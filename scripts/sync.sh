@@ -149,6 +149,15 @@ for r in "${repos[@]}"; do
     gi >= 0 && NF && $1 !~ /^#/ {match($0, /^ */); if (RLENGTH > gi) g[n]=1; gi=-1}
     END {for (i = 1; i <= n; i++) if (!g[i]) b++; print n+0, b+0}')
   chk dependabot_grouped standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without groups"
+  # every updates entry needs commit-message.prefix = Conventional Commit type(scope), so PR titles pass pr-title.yml
+  read -r n bad < <( { raw .github/dependabot.yml; raw .github/dependabot.yaml; } | awk '
+    /^[[:space:]]*- package-ecosystem:/ {n++; p[n]=0; ci=-1; next}
+    n && /^[[:space:]]*commit-message:[[:space:]]*(#.*)?$/ {match($0, /^ */); ci=RLENGTH; next}
+    ci >= 0 && NF && $1 !~ /^#/ {match($0, /^ */); if (RLENGTH <= ci) ci=-1
+      else if ($1 == "prefix:") {v=$2; gsub(/["\047]/, "", v)
+        if (v ~ /^(feat|fix|perf|refactor|revert|docs|style|test|build|ci|chore)(\([a-z0-9._\/-]+\))?$/) p[n]=1}}
+    END {for (i = 1; i <= n; i++) if (!p[i]) b++; print n+0, b+0}')
+  chk dependabot_prefix standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without a Conventional Commit commit-message.prefix"
   chk agents_md standard "$(ok has AGENTS\\.md)" "no AGENTS.md"
   if excepted claude_symlink; then # local untracked symlink, gitignored (docs/standard.md Exceptions)
     chk claude_symlink standard "$(ok local_claude)" "want AGENTS.md and /CLAUDE.md in .gitignore"
