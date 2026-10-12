@@ -94,12 +94,12 @@ link_sha=$(printf AGENTS.md | git hash-object --stdin) # blob of a symlink point
 gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].path') # inherited community health files
 
 # Helpers read the current repo's globals ($r, $paths, $entries, $m, ...).
-# shellcheck disable=SC2329 # job_ok etc. are invoked through ok()
+# shellcheck disable=SC2317,SC2329 # job_ok etc. are invoked through ok()
 {
   chk() { rec+="$1	$2	$3	${4:-}"$'\n'; }        # id kind pass|present detail
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
-  raw() { has "${1//./\\.}" && gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; }
+  raw() { if has "${1//./\\.}"; then gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; fi; }
   excepted() { jq -e --arg c "$1" '(.exceptions // []) | index($c)' <<<"${m:-null}" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
   local_claude() { has 'AGENTS\.md' && raw .gitignore | grep -qx /CLAUDE.md; }
