@@ -30,3 +30,6 @@ Before archiving each repo:
 1. Re-check consumers: `gh search code "giocaizzi/<repo>" --owner giocaizzi`, and grep every repo's `.github/workflows/` (code search can lag).
 2. Close or migrate its open issues (`actions` has #3, #4, #6, #10, #12, #21): anything still relevant moves here as an issue.
 3. Update its README with a deprecation notice pointing to this repo, then `gh repo archive giocaizzi/<repo>`. Archive, do not delete: archived repos keep tags and links working and can be unarchived.
+
+## Scheduled audit
+`.github/workflows/audit.yml` runs weekly and opens or updates a `drift` issue. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration + Metadata on all repos). Apply modes: `scripts/sync.sh apply settings|labels|ruleset [repo ...]`.

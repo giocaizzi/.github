@@ -18,3 +18,4 @@
 - {name: "python:uv", color: 2b67c6, description: "Pull requests that update python:uv code"}
 - {name: "autorelease: pending", color: ededed, description: "release-please: release PR open"}
 - {name: "autorelease: tagged", color: ededed, description: "release-please: tagged release"}
+- {name: drift, color: b60205, description: "A repo deviates from the GitHub standard"}
