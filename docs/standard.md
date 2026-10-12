@@ -50,7 +50,13 @@ Secret scanning + push protection on public repos only (private repos need GHAS)
 Every public repo has a `LICENSE` (MIT unless stated otherwise).
 
 ## README
-`README.md` is for humans: short description, badges (CI status and license; plus PyPI version, latest release and Codecov where they apply), quickstart, features, and links into `docs/` for details. Agent instructions live only in `AGENTS.md`, never in the README; the README never duplicates `docs/`. `giocaizzi/template` ships the skeleton. Documented only, not audited.
+`README.md` is for humans. Agent instructions live only in `AGENTS.md`, never in the README; the README never duplicates `docs/`. Reference layout: `py3dinterpolations` and `btc-cycles`: a centered `<div align="center">` header (optional logo, `# name`, bold one-line tagline, one row of linked shields.io / GitHub workflow badges, `</div>`), `---`, a short description, a quickstart code block, features, a link to `docs/`, a license line. `giocaizzi/template` ships the skeleton. Documented only, not audited.
+
+Badges are added progressively, in the order PyPI, Python, CI, Coverage, Docs, Ruff, License:
+- **Every repo**: header, tagline, CI badge (`ci.yml`) and License badge, description, quickstart, link to `docs/`, license line.
+- **Public**: plus a language/tooling badge where it applies (e.g. Ruff for Python).
+- **Released**: plus the latest release badge; for PyPI packages the PyPI version and Python versions badges, and install from PyPI in the quickstart.
+- **Docs site or coverage live**: plus a Docs badge linking the site and a Coverage (Codecov) badge; optional logo (`assets/logo.png`) and a screenshot or plot when the output is visual.
 
 ## Environments and publishing
 Every workflow job that publishes or deploys runs in a named GitHub environment (`pypi` for PyPI, `production` or `<target>` for deploys), and its secrets are environment secrets, not repository secrets. PyPI publishing uses trusted publishing (OIDC, no token), triggered by the release.
