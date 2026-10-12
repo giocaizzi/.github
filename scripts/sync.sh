@@ -142,6 +142,13 @@ for r in "${repos[@]}"; do
     chk "${w/-/_}" standard "$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")" "workflow drift: $w.yml"
   done
   chk dependabot standard "$(ok has '\.github/dependabot\.ya?ml')" "no .github/dependabot.yml"
+  # every updates entry needs a non-empty `groups:` block; prints "<entries> <ungrouped>"
+  read -r n bad < <( { raw .github/dependabot.yml; raw .github/dependabot.yaml; } | awk '
+    /^[[:space:]]*- package-ecosystem:/ {n++; g[n]=0; gi=-1; next}
+    n && /^[[:space:]]*groups:[[:space:]]*(#.*)?$/ {match($0, /^ */); gi=RLENGTH; next}
+    gi >= 0 && NF && $1 !~ /^#/ {match($0, /^ */); if (RLENGTH > gi) g[n]=1; gi=-1}
+    END {for (i = 1; i <= n; i++) if (!g[i]) b++; print n+0, b+0}')
+  chk dependabot_grouped standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without groups"
   chk agents_md standard "$(ok has AGENTS\\.md)" "no AGENTS.md"
   if excepted claude_symlink; then # local untracked symlink, gitignored (docs/standard.md Exceptions)
     chk claude_symlink standard "$(ok local_claude)" "want AGENTS.md and /CLAUDE.md in .gitignore"
