@@ -15,7 +15,6 @@
 - {name: ralph-copilot, type: config, released: false}
 - {name: rp5-homeserver, type: infra, released: true, exceptions: [claude_symlink]}
 - {name: shortty, type: typescript, released: false}
-- {name: private-repo, type: python, released: false}
 - {name: private-repo, type: python, released: true}
 - {name: template, type: config, released: false}
 - {name: private-repo, type: docs, released: false}
