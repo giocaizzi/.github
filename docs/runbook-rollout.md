@@ -29,8 +29,9 @@ Delete the ruleset: `gh api -X DELETE repos/giocaizzi/<repo>/rulesets/<id>` (id 
 
 | Repo | Superseded by | Status |
 |---|---|---|
-| `giocaizzi/labels` | `standard/labels.yaml` here | content migrated; no workflow consumers found |
-| `giocaizzi/actions` | per-repo plain `ci.yml` (no reusable workflows) | no `uses: giocaizzi/actions` found in default-branch workflows; tags up to v0.3.0 stay for old refs |
+| `giocaizzi/labels` | `standard/labels.yaml` here | deleted 2026-10-12 |
+| `giocaizzi/actions` | per-repo plain `ci.yml` (no reusable workflows) | deleted 2026-10-12 |
+| `giocaizzi/agent-mods` | `guard` plugin of `giocaizzi/harness` | deleted 2026-10-12; open issues moved to harness |
 
 Before archiving each repo:
 1. Re-check consumers: `gh search code "giocaizzi/<repo>" --owner giocaizzi`, and grep every repo's `.github/workflows/` (code search can lag).
