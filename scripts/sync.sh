@@ -45,8 +45,10 @@ if [ "$mode" = apply ]; then
             -f content="$(base64 < "$f" | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
           changed=1
         done
-        [ $changed = 1 ] && gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "ci: add standard workflows" \
-          --body "Adds the standard workflows from giocaizzi/.github (\`standard/workflows/\`), e.g. the required \`Validate PR title\` check." >/dev/null 2>&1 || true ;;
+        if [ $changed = 1 ]; then
+          gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "ci: add standard workflows" \
+          --body "Adds the standard workflows from giocaizzi/.github (\`standard/workflows/\`), e.g. the required \`Validate PR title\` check." >/dev/null 2>&1 || true
+        fi ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
