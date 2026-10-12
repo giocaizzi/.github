@@ -24,7 +24,7 @@ Default-branch rules: PR required (squash), up-to-date branch, required status c
 Squash only, auto-merge, delete-branch-on-merge, secret scanning and push protection on. Dependabot updates configured per repo (`.github/dependabot.yml`: ecosystem + `github-actions`).
 
 ## Labels (`standard/labels.yaml`)
-Type (bug, enhancement, documentation, question, wontfix, duplicate), priority P1–P3, `parity`, and the automation labels Dependabot and release-please create. Extras in a repo are tolerated; missing ones are drift.
+Type (bug, enhancement, documentation, question, wontfix, duplicate), priority P1–P3, `parity`, and the automation labels Dependabot and release-please create. Only standard labels may exist: `sync.sh apply labels` deletes extras and the `label-guard` workflow (`standard/workflows/label-guard.yml`) deletes a non-standard label as soon as it is created or renamed. To add a label, change `standard/labels.yaml` here first. GitHub cannot block label creation natively.
 
 ## CI and releases
 - One `ci.yml` per repo, plain (no reusable workflows; `giocaizzi/actions` is retired). Python: `uv`, ruff, mypy, pytest. Every repo exposes `make help|lint|test|check` and CI runs `make check`.

@@ -13,6 +13,7 @@ repos=("$@")
 [ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
   gh repo list "$OWNER" --no-archived --source --limit 200 --json name -q '.[].name' | grep -vx '.github')
 
+
 want_labels=$(grep -oE 'name: ("[^"]+"|[^,}]+)' "$DIR/standard/labels.yaml" | sed -E 's/name: //; s/"//g')
 
 if [ "$mode" = apply ]; then
@@ -29,7 +30,11 @@ if [ "$mode" = apply ]; then
         while IFS= read -r l; do
           n=$(sed -E 's/^- \{name: "?([^",]+)"?,.*/\1/' <<<"$l"); c=$(sed -E 's/.*color: "?([0-9a-fA-F]+)"?,.*/\1/' <<<"$l"); d=$(sed -E 's/.*description: "([^"]*)"\}.*/\1/' <<<"$l")
           gh label create "$n" --color "$c" --description "$d" --force -R "$OWNER/$r" >/dev/null
-        done <<<"$yq_names" ;;
+        done <<<"$yq_names"
+        # prune: delete every label not in the standard (removes it from issues/PRs too)
+        gh label list -R "$OWNER/$r" --limit 500 --json name -q '.[].name' | while IFS= read -r l; do
+          grep -qxF "$l" <<<"$want_labels" || gh label delete "$l" --yes -R "$OWNER/$r" >/dev/null
+        done ;;
       workflows)
         # Opens a PR adding/updating standard/workflows/* on a `chore/standard-workflows` branch. Merge it, then apply the ruleset.
         base=$(gh api "repos/$OWNER/$r" -q .default_branch)
@@ -85,6 +90,7 @@ for r in "${repos[@]}"; do
   done
   have=$(gh label list -R "$OWNER/$r" --limit 200 --json name -q '.[].name')
   while IFS= read -r l; do grep -qxF "$l" <<<"$have" || out+=("label missing: $l"); done <<<"$want_labels"
+  while IFS= read -r l; do grep -qxF "$l" <<<"$want_labels" || out+=("label extra: $l"); done <<<"$have"
   if [ ${#out[@]} -eq 0 ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; printf '        %s\n' "${out[@]}"; fi
 done
 exit $drift
