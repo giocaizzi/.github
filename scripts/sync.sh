@@ -19,8 +19,8 @@ if [ "$mode" = apply ]; then
   for r in "${repos[@]}"; do
     case $what in
       settings)
-        jq 'del(.security_and_analysis)' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
-        # secret scanning needs GHAS on private repos: skip there, CI runs gitleaks instead
+        jq --argjson priv "$(gh api "repos/$OWNER/$r" -q .private)" 'del(.security_and_analysis) | if $priv then del(.allow_auto_merge) else . end' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
+        # free plan: private repos get no secret scanning, auto-merge or rulesets; CI runs gitleaks instead
         if [ "$(gh api "repos/$OWNER/$r" -q .private)" = false ]; then
           jq '{security_and_analysis}' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
         fi ;;
@@ -31,6 +31,7 @@ if [ "$mode" = apply ]; then
           gh label create "$n" --color "$c" --description "$d" --force -R "$OWNER/$r" >/dev/null
         done <<<"$yq_names" ;;
       ruleset)
+        [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
         if [ -n "$id" ]; then gh api -X PUT "repos/$OWNER/$r/rulesets/$id" --input "$DIR/standard/ruleset-main.json" >/dev/null
         else gh api "repos/$OWNER/$r/rulesets" --method POST --input "$DIR/standard/ruleset-main.json" >/dev/null; fi ;;
@@ -48,6 +49,7 @@ for r in "${repos[@]}"; do
   while IFS= read -r k; do
     want=$(jq -r --arg k "$k" '.[$k]' "$DIR/standard/repo-settings.json")
     got=$(jq -r --arg k "$k" '.[$k]' <<<"$s")
+    [ "$k" = allow_auto_merge ] && [ "$(jq -r .private <<<"$s")" = true ] && continue
     [ "$want" = "$got" ] || out+=("$k: $got (want $want)")
   done < <(jq -r 'del(.security_and_analysis)|keys[]' "$DIR/standard/repo-settings.json")
   for k in secret_scanning secret_scanning_push_protection; do
@@ -55,7 +57,9 @@ for r in "${repos[@]}"; do
     got=$(jq -r --arg k "$k" '.security_and_analysis[$k].status // "n/a"' <<<"$s")
     [ "$got" = enabled ] || out+=("$k: $got (want enabled)")
   done
-  gh api "repos/$OWNER/$r/rulesets" -q '.[].name' | grep -qx main || out+=("ruleset main: missing")
+  if [ "$(jq -r .private <<<"$s")" = false ]; then
+    gh api "repos/$OWNER/$r/rulesets" -q '.[].name' | grep -qx main || out+=("ruleset main: missing")
+  fi
   have=$(gh label list -R "$OWNER/$r" --limit 200 --json name -q '.[].name')
   while IFS= read -r l; do grep -qxF "$l" <<<"$have" || out+=("label missing: $l"); done <<<"$want_labels"
   if [ ${#out[@]} -eq 0 ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; printf '        %s\n' "${out[@]}"; fi
