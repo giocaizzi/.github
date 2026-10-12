@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit or apply ../standard. Usage: sync.sh audit [repo ...] | sync.sh apply <settings|labels|workflows|ruleset> [repo ...]
+# Audit or apply ../standard. Usage: sync.sh audit [repo ...] | sync.sh apply <settings|labels|workflows|ruleset> [repo ...] | sync.sh onboard <repo>
 # `audit` is read-only. Default scope: every non-fork, non-archived repo of the owner.
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
 set -euo pipefail
@@ -7,7 +7,17 @@ OWNER=${OWNER:-giocaizzi}
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 
 mode=${1:-}
-case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|ruleset}; shift ;; *) echo "usage: $0 audit|apply ..." >&2; exit 2 ;; esac
+if [ "$mode" = onboard ]; then
+  r=${2:?usage: sync.sh onboard <repo>}
+  for w in settings labels workflows; do "$0" apply "$w" "$r"; done
+  base=$(gh api "repos/$OWNER/$r" -q .default_branch)
+  sha=$(gh api "repos/$OWNER/$r/commits/$base" -q .sha)
+  ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
+  if [ "${ok:-0}" -gt 0 ]; then "$0" apply ruleset "$r"
+  else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
+  exec "$0" audit "$r"
+fi
+case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
 shift
 repos=("$@")
 [ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(

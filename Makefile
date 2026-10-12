@@ -1,4 +1,4 @@
-.PHONY: help lint test check audit
+.PHONY: help lint test check audit onboard
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -15,3 +15,7 @@ check: lint test ## lint + test
 
 audit: ## Report drift of all repos against the standard (read-only)
 	scripts/sync.sh audit
+
+onboard: ## Apply the standard to a new repo: make onboard REPO=<name>
+	@test -n "$(REPO)" || { echo "usage: make onboard REPO=<name>"; exit 2; }
+	scripts/sync.sh onboard $(REPO)
