@@ -1,17 +1,40 @@
 #!/usr/bin/env bash
-# Audit repos against ../standard. Read-only. Usage: sync.sh audit [repo ...]
-# Default scope: every non-fork, non-archived repo of the owner.
+# Audit or apply ../standard. Usage: sync.sh audit [repo ...] | sync.sh apply <settings|labels|ruleset> [repo ...]
+# `audit` is read-only. Default scope: every non-fork, non-archived repo of the owner.
+# `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
 set -euo pipefail
 OWNER=${OWNER:-giocaizzi}
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 
-[ "${1:-}" = audit ] || { echo "usage: $0 audit [repo ...]" >&2; exit 2; }
+mode=${1:-}
+case $mode in audit) ;; apply) what=${2:?settings|labels|ruleset}; shift ;; *) echo "usage: $0 audit|apply ..." >&2; exit 2 ;; esac
 shift
 repos=("$@")
 [ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
   gh repo list "$OWNER" --no-archived --source --limit 200 --json name -q '.[].name' | grep -vx '.github')
 
 want_labels=$(grep -oE 'name: ("[^"]+"|[^,}]+)' "$DIR/standard/labels.yaml" | sed -E 's/name: //; s/"//g')
+
+if [ "$mode" = apply ]; then
+  for r in "${repos[@]}"; do
+    case $what in
+      settings) gh api -X PATCH "repos/$OWNER/$r" --input "$DIR/standard/repo-settings.json" >/dev/null ;;
+      labels)
+        yq_names=$(grep -E '^- \{' "$DIR/standard/labels.yaml")
+        while IFS= read -r l; do
+          n=$(sed -E 's/^- \{name: "?([^",]+)"?,.*/\1/' <<<"$l"); c=$(sed -E 's/.*color: "?([0-9a-fA-F]+)"?,.*/\1/' <<<"$l"); d=$(sed -E 's/.*description: "([^"]*)"\}.*/\1/' <<<"$l")
+          gh label create "$n" --color "$c" --description "$d" --force -R "$OWNER/$r" >/dev/null
+        done <<<"$yq_names" ;;
+      ruleset)
+        id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
+        if [ -n "$id" ]; then gh api -X PUT "repos/$OWNER/$r/rulesets/$id" --input "$DIR/standard/ruleset-main.json" >/dev/null
+        else gh api "repos/$OWNER/$r/rulesets" --method POST --input "$DIR/standard/ruleset-main.json" >/dev/null; fi ;;
+      *) echo "unknown: $what" >&2; exit 2 ;;
+    esac
+    echo "applied $what $r"
+  done
+  exit 0
+fi
 
 drift=0
 for r in "${repos[@]}"; do
