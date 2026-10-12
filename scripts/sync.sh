@@ -18,7 +18,12 @@ want_labels=$(grep -oE 'name: ("[^"]+"|[^,}]+)' "$DIR/standard/labels.yaml" | se
 if [ "$mode" = apply ]; then
   for r in "${repos[@]}"; do
     case $what in
-      settings) gh api -X PATCH "repos/$OWNER/$r" --input "$DIR/standard/repo-settings.json" >/dev/null ;;
+      settings)
+        jq 'del(.security_and_analysis)' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
+        # secret scanning needs GHAS on private repos: skip there, CI runs gitleaks instead
+        if [ "$(gh api "repos/$OWNER/$r" -q .private)" = false ]; then
+          jq '{security_and_analysis}' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
+        fi ;;
       labels)
         yq_names=$(grep -E '^- \{' "$DIR/standard/labels.yaml")
         while IFS= read -r l; do
@@ -46,6 +51,7 @@ for r in "${repos[@]}"; do
     [ "$want" = "$got" ] || out+=("$k: $got (want $want)")
   done < <(jq -r 'del(.security_and_analysis)|keys[]' "$DIR/standard/repo-settings.json")
   for k in secret_scanning secret_scanning_push_protection; do
+    [ "$(jq -r .private <<<"$s")" = true ] && continue # needs GHAS; CI runs gitleaks
     got=$(jq -r --arg k "$k" '.security_and_analysis[$k].status // "n/a"' <<<"$s")
     [ "$got" = enabled ] || out+=("$k: $got (want enabled)")
   done
