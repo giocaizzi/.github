@@ -12,6 +12,8 @@ shift
 repos=("$@")
 [ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
   gh repo list "$OWNER" --no-archived --source --limit 200 --json name -q '.[].name' | grep -vx '.github')
+# Fail loudly instead of passing on an empty scope (e.g. a missing or under-scoped token).
+[ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
 
 want_labels=$(grep -oE 'name: ("[^"]+"|[^,}]+)' "$DIR/standard/labels.yaml" | sed -E 's/name: //; s/"//g')
