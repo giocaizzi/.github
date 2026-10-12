@@ -27,3 +27,6 @@ Secret scanning + push protection on every public repo (private repos need GHAS,
 
 ## Per-repo docs
 Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink) and `docs/`; this standard is linked, not copied.
+
+## Private repos on the free plan
+Rulesets, branch protection, auto-merge and secret scanning are unavailable (GitHub returns 403/422). Private repos keep everything else: squash-only, delete-on-merge, labels, a `check` CI job with gitleaks, and the PR-only convention enforced by `AGENTS.md`. Moving to GitHub Pro or making a repo public lifts this; then rerun `sync.sh apply`.
