@@ -23,7 +23,7 @@ Type (bug, enhancement, documentation, question, wontfix, duplicate), priority P
 - Python tooling is `uv` only; no poetry.
 
 ## Security
-Secret scanning + push protection on every repo; CI adds gitleaks. Security policy in `SECURITY.md` (inherited from this repo).
+Secret scanning + push protection on every public repo (private repos need GHAS, so they skip it); CI adds gitleaks on all. Security policy in `SECURITY.md` (inherited from this repo).
 
 ## Per-repo docs
 Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink) and `docs/`; this standard is linked, not copied.
