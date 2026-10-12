@@ -9,7 +9,7 @@
 - {name: private-repo, type: typescript, released: true}
 - {name: greenhouse, type: python, released: true}
 - {name: harness, type: config, released: false}
-- {name: mplStrater, type: python, released: true}
+- {name: mplStrater, type: python, released: false}
 - {name: picow-ws2812, type: python, released: false}
 - {name: py3dinterpolations, type: python, released: true}
 - {name: ralph-copilot, type: config, released: false}
