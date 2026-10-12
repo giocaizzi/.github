@@ -19,7 +19,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: |
-          scripts/sync.sh audit | tee audit.txt || echo "drift=1" >> "$GITHUB_ENV"
+          set +e
+          scripts/sync.sh audit | tee audit.txt
+          rc=${PIPESTATUS[0]}
+          # 1 = drift (open/update the issue); anything else = the audit itself broke
+          [ "$rc" = 1 ] && echo "drift=1" >> "$GITHUB_ENV"
+          [ "$rc" = 0 ] || [ "$rc" = 1 ]
       - name: Open or update the drift issue
         if: env.drift == '1'
         env:
