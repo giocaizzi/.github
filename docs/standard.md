@@ -2,6 +2,9 @@
 
 Applies to all non-fork, non-archived repositories of `giocaizzi`. Reference implementation: `giocaizzi/greenhouse`. Machine-readable parts live in `standard/`.
 
+## New repos
+Start from `giocaizzi/template` and run `make onboard REPO=<name>` (runbook: [runbook-rollout.md](runbook-rollout.md)). Nothing in GitHub applies this standard automatically on a personal account; the weekly audit flags any repo that skipped it.
+
 ## Pull requests
 - `main` changes only through a PR that passed CI; no bypass actors, no force-push, no deletion.
 - Squash merge only. The squash commit is built from the PR, never from branch commits: title = PR title (`squash_merge_commit_title: PR_TITLE`), body = PR description (`squash_merge_commit_message: PR_BODY`). Branch commit messages are history only.
