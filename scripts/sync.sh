@@ -228,6 +228,8 @@ for r in "${repos[@]}"; do
   if [ "$type" = infra ]; then chk iac_validate typed "$(ok grep -q validate <<<"$ci$mk")" "no validate step in ci.yml or Makefile"
   else chk iac extra "$iac"; fi
   [ "$released" = true ] && chk release_please typed "$(ok has release-please-config\\.json)" "released but no release-please-config.json"
+  [ "$released" = true ] && has uv\\.lock && has release-please-config\\.json &&
+    chk uv_lock_release typed "$(ok grep -q 'uv\.lock' <<<"$(raw release-please-config.json)")" "uv.lock not in release-please extra-files (its recorded version goes stale after each release)"
   for f in codecov.yml .codecov.yml; do
     has "${f//./\\.}" && chk codecov_informational typed "$(ok grep -q 'informational: true' <<<"$(raw "$f")")" "$f lacks informational: true"
   done
