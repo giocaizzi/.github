@@ -49,16 +49,26 @@ Secret scanning + push protection on public repos only (private repos need GHAS)
 ## License
 Every public repo has a `LICENSE` (MIT unless stated otherwise).
 
+## README
+`README.md` is for humans: short description, badges (CI status and license; plus PyPI version, latest release and Codecov where they apply), quickstart, features, and links into `docs/` for details. Agent instructions live only in `AGENTS.md`, never in the README; the README never duplicates `docs/`. `giocaizzi/template` ships the skeleton. Documented only, not audited.
+
+## Environments and publishing
+Every workflow job that publishes or deploys runs in a named GitHub environment (`pypi` for PyPI, `production` or `<target>` for deploys), and its secrets are environment secrets, not repository secrets. PyPI publishing uses trusted publishing (OIDC, no token), triggered by the release.
+
+Environments and environment secrets are available on public repos on every plan; private repos need GitHub Pro, Team or Enterprise ([docs](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)). On the free plan the checks `environments` and `pypi_publish` therefore apply to public repos only (private ones list them under `exempt`).
+
 ## Per-repo docs
 Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink to it, tracked as a git symlink) and `docs/`; this standard is linked, not copied.
 
 ## Repo types (`standard/repos.yaml`)
-Every in-scope repo is listed with `type` (`python`, `typescript`, `infra`, `config`, `docs`) and `released` (ships versioned releases). The type decides which typed rules apply.
+Every in-scope repo is listed with `type` (`python`, `typescript`, `infra`, `config`, `docs`) and `released` (ships versioned releases). The type decides which typed rules apply. Optional flags: `pypi: true` (published on PyPI) and `deploys: true` (has publish/deploy jobs) switch on the checks in [Environments and publishing](#environments-and-publishing).
 
 ## Audit
 `scripts/sync.sh audit` reports three kinds of checks; standard and typed failures are drift (exit 1), extras never are.
 - **Standard** (every repo): listed in `repos.yaml`; `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` + `CLAUDE.md` symlink; squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
-- **Typed** (when applicable): tests (python, typescript); `uv.lock` + ruff + mypy + pytest (python); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released); `informational: true` (when `codecov.yml` exists).
+- **Typed** (when applicable): tests (python, typescript); `uv.lock` + ruff + mypy + pytest (python); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released); `informational: true` (when `codecov.yml` exists); `environments` and `pypi_publish` (public repos only).
+  - `environments` (`deploys: true` or `pypi: true`): every job in `.github/workflows/*.yml` with a publish/deploy step declares `environment:`. A step counts as publish/deploy when the job contains `gh-action-pypi-publish`, `uv publish`, `docker push`, `deploy-pages`, `cosign sign`, `wrangler deploy`, a `/webhooks/` call, `scp`/`rsync`/`ssh`, or `docker/build-push-action` with `push: true`. Repository secrets named like `PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER` also fail it (names only).
+  - `pypi_publish` (`pypi: true`): `release-please-config.json` plus a workflow that publishes with `pypa/gh-action-pypi-publish` or `uv publish`, `id-token: write`, no token, `environment: pypi`, triggered by `release:` or a release-please output.
 - **Extras** (presence only): pre-commit, CODEOWNERS, changelog, Dockerfile, live docs site (GitHub Pages or a homepage URL), plus tests, Terraform and `LICENSE` where not required.
 
 `--json` emits one object per repo (checks, extras, exemptions, scores); the weekly audit uploads it as the `audit` artifact.
