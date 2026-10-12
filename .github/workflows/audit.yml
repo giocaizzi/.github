@@ -1,0 +1,30 @@
+name: Audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # AUDIT_TOKEN: fine-grained PAT, read-only "Administration" + "Metadata" on all repos.
+      - name: Audit all repos
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+        run: |
+          scripts/sync.sh audit | tee audit.txt || echo "drift=1" >> "$GITHUB_ENV"
+      - name: Open or update the drift issue
+        if: env.drift == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh issue list --label drift --state open --json number -q '.[0].number')
+          if [ -n "$n" ]; then gh issue comment "$n" --body-file audit.txt
+          else gh issue create --title "Standard drift" --label drift --body-file audit.txt; fi
