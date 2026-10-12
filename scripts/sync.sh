@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Audit or apply ../standard. Usage: sync.sh audit [--json] [repo ...] | sync.sh apply <settings|labels|workflows|ruleset> [repo ...] | sync.sh onboard <repo>
+# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
 # `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope. `--json` prints a JSON array on stdout and the text report on stderr.
-# Default scope: every non-fork, non-archived repo of the owner.
+# Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
+# Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
 set -euo pipefail
 OWNER=${OWNER:-giocaizzi}
@@ -9,8 +10,11 @@ DIR=$(cd "$(dirname "$0")/.." && pwd)
 
 mode=${1:-}
 if [ "$mode" = onboard ]; then
-  r=${2:?usage: sync.sh onboard <repo>}
-  grep -q "name: $r," "$DIR/standard/repos.yaml" || echo "warning: add $r to standard/repos.yaml (type, released) via PR; the audit fails it until then"
+  r=${2:?usage: sync.sh onboard <repo> <type> [flag,...]} t=${3:?usage: sync.sh onboard <repo> <type> [flag,...]}
+  # add std-<type> and std-<flag> topics, keeping existing ones
+  gh api "repos/$OWNER/$r/topics" -q .names | jq --arg t "$t" --arg f "${4:-}" \
+    '{names: (. + ([$t] + ($f | split(",")) | map(select(length > 0) | "std-" + .)) | unique)}' \
+    | gh api -X PUT "repos/$OWNER/$r/topics" --input - >/dev/null
   for w in settings labels workflows; do "$0" apply "$w" "$r"; done
   base=$(gh api "repos/$OWNER/$r" -q .default_branch)
   sha=$(gh api "repos/$OWNER/$r/commits/$base" -q .sha)
@@ -21,11 +25,15 @@ if [ "$mode" = onboard ]; then
 fi
 case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
 shift
-json=0
-[ "$mode" = audit ] && [ "${1:-}" = --json ] && { json=1; shift; }
+json=0 vis=all
+while [ "$mode" = audit ] && [ $# -gt 0 ]; do
+  case $1 in --json) json=1; shift ;; --visibility) vis=${2:-}; shift 2 ;; *) break ;; esac
+done
+case $vis in public|private|all) ;; *) echo "--visibility: public|private|all" >&2; exit 2 ;; esac
 repos=("$@")
 [ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
-  gh repo list "$OWNER" --no-archived --source --limit 200 --json name -q '.[].name' | grep -vx '.github')
+  gh repo list "$OWNER" --no-archived --source --limit 200 --json name,visibility \
+    | jq -r --arg v "$vis" '.[] | select($v == "all" or (.visibility | ascii_downcase) == $v) | .name' | grep -vx '.github')
 # Fail loudly instead of passing on an empty scope (e.g. a missing or under-scoped token).
 [ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
@@ -85,10 +93,8 @@ if [ "$mode" = apply ]; then
 fi
 
 # --- audit (read-only) ---
-# Checks: standard (always, drift), typed (by repos.yaml type/released and repo contents, drift), extra (presence only, never drift).
+# Checks: standard (always, drift), typed (by topic type/flags and repo contents, drift), extra (presence only, never drift).
 [ $json = 1 ] && exec 3>&1 1>&2 # JSON on fd 3 (stdout), text report on stderr
-# standard/repos.yaml flow mappings -> JSON (values become strings, e.g. released: "true")
-meta_all=$(grep -E '^- \{' "$DIR/standard/repos.yaml" | sed -E 's/^- //; s/([A-Za-z0-9_.-]+)/"\1"/g' | jq -s .)
 std=$(cat "$DIR/standard/repo-settings.json")
 link_sha=$(printf AGENTS.md | git hash-object --stdin) # blob of a symlink pointing to AGENTS.md
 gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].path') # inherited community health files
@@ -100,7 +106,7 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
   raw() { if has "${1//./\\.}"; then gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; fi; }
-  excepted() { jq -e --arg c "$1" '(.exceptions // []) | index($c)' <<<"${m:-null}" >/dev/null; }
+  excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
   local_claude() { has 'AGENTS\.md' && raw .gitignore | grep -qx /CLAUDE.md; }
   no_poetry() { ! has '(.*/)?poetry\.lock' && ! grep -q '^\[tool\.poetry' <<<"$py"; }
@@ -138,13 +144,13 @@ for r in "${repos[@]}"; do
   base=$(jq -r .default_branch <<<"$s")
   entries=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1" -q '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"')
   paths=$(cut -d' ' -f3- <<<"$entries")
-  m=$(jq -c --arg r "$r" '.[]|select(.name==$r)' <<<"$meta_all")
-  type=$(jq -r '.type // "unknown"' <<<"${m:-null}")
-  released=$(jq -r '.released == "true"' <<<"${m:-null}")
+  m=$(jq -c -f "$DIR/scripts/meta.jq" <<<"$s")
+  type=$(jq -r .type <<<"$m")
+  released=$(jq -r .released <<<"$m")
   ci=$(raw .github/workflows/ci.yml); mk=$(raw Makefile); py=$(raw pyproject.toml)
 
   # standard
-  chk repo_type standard "$(ok test -n "$m")" "not listed in standard/repos.yaml"
+  chk repo_type standard "$(ok test "$type" != unknown)" "want exactly one std-<type> topic, got: $(jq -r '.types | join(",")' <<<"$m")"
   job=$(awk '/^  check:/{f=1;next} f&&/^  [^ #]/{f=0} f' <<<"$ci")
   if [ -z "$ci" ]; then chk ci_check_job standard false "no .github/workflows/ci.yml"
   elif [ -z "$job" ]; then chk ci_check_job standard false "ci.yml has no job check"
@@ -227,7 +233,7 @@ for r in "${repos[@]}"; do
   done
 
   # environments / PyPI: environments exist on public repos (private ones need a paid plan)
-  pypi=$(jq -r '.pypi == "true"' <<<"${m:-null}"); deploys=$(jq -r '.deploys == "true"' <<<"${m:-null}")
+  pypi=$(jq -r .pypi <<<"$m"); deploys=$(jq -r .deploys <<<"$m")
   if [ "$pypi" = true ] || [ "$deploys" = true ]; then
     if [ "$priv" = true ]; then ex+="environments pypi_publish "
     else

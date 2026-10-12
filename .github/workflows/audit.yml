@@ -15,12 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # AUDIT_TOKEN: fine-grained PAT, read-only "Administration", "Contents", "Issues" + "Metadata" on all repos.
-      - name: Audit all repos
+      # Public repos only: this repo, its artifact and its issues are public. Private repos are audited locally.
+      - name: Audit public repos
         env:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: |
           set +e
-          scripts/sync.sh audit --json > audit.json 2> audit.txt
+          scripts/sync.sh audit --json --visibility public > audit.json 2> audit.txt
           rc=$?
           cat audit.txt
           # 1 = drift (open/update the issue); anything else = the audit itself broke

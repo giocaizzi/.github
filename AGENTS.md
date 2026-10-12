@@ -4,11 +4,12 @@ Canonical GitHub standard for every giocaizzi repository, plus the read-only aud
 
 - Standard (source of truth): [docs/standard.md](docs/standard.md)
 - Rollout and audit procedure: [docs/runbook-rollout.md](docs/runbook-rollout.md)
-- Machine-readable standard: `standard/` (labels, ruleset, repo settings, repo types in `repos.yaml`)
+- Machine-readable standard: `standard/` (labels, ruleset, repo settings); repo type and flags are GitHub topics on each repo (`std-<type>`, `std-<flag>`, parsed by `scripts/meta.jq`)
 - Org-wide `SECURITY.md` and `.github/ISSUE_TEMPLATE/` here are inherited by every repo.
-- `make audit` reports drift for all repos (`make audit JSON=1` for the dashboard JSON; the weekly run uploads it as artifact `audit`, see the runbook); `make onboard REPO=<name>` applies the standard to a new repo (created from `giocaizzi/template`); `make check` = lint + test.
+- `make audit` reports drift (`VISIBILITY=public|private`, `JSON=1` for the dashboard JSON; the weekly run here audits public repos only and uploads artifact `audit`, see the runbook); `make onboard REPO=<name> TYPE=<type> [FLAGS=released,pypi]` sets the topics and applies the standard to a new repo (created from `giocaizzi/template`); `make check` = lint + test.
 
 Gotchas
 - `greenhouse` is the reference implementation; change the standard here first, then the repos.
 - Never apply the ruleset to a repo that lacks a `check` job: it blocks every merge.
-- Every repo must be listed in `standard/repos.yaml`; the audit fails an unlisted one.
+- Every repo needs exactly one `std-<type>` topic; the audit fails it otherwise.
+- This repo is public: never name a private repo or include private data in files, issues, PRs or artifacts here.

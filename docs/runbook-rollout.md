@@ -4,7 +4,7 @@ Prereqs: `gh` authenticated with `repo` + `administration` scope, `jq`, `shellch
 
 ## Audit (read-only)
 ```bash
-make audit                      # all in-scope repos
+make audit                      # all in-scope repos (VISIBILITY=public|private to narrow)
 scripts/sync.sh audit greenhouse # one repo
 ```
 Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope. Output lists each failing check as `id: detail`.
@@ -18,9 +18,8 @@ One object per repo: `repo`, `type`, `released`, `private`, `exempt` (check ids 
 
 ## New repo
 1. Create it from the template: `gh repo create giocaizzi/<name> --template giocaizzi/template --public --clone` (starts with CI `check`, PR-title and label-guard workflows, Dependabot, Makefile, AGENTS.md + CLAUDE.md, LICENSE).
-2. Add it to `standard/repos.yaml` here (`type`, `released`; `pypi: true` for a PyPI package, `deploys: true` for publish/deploy jobs) via PR; the audit fails an unlisted repo.
-3. `make onboard REPO=<name>` here: applies settings, labels and workflows, applies the ruleset once `check` is green on the default branch, then audits the repo.
-4. If it printed "ruleset not applied", merge any open PRs, wait for `check` on the default branch, then `scripts/sync.sh apply ruleset <name>`.
+2. `make onboard REPO=<name> TYPE=<python|typescript|infra|config|docs> [FLAGS=released,pypi,deploys]` here: adds the `std-<type>` and `std-<flag>` topics (existing topics kept), applies settings, labels and workflows, applies the ruleset once `check` is green on the default branch, then audits the repo. The audit fails a repo without exactly one `std-<type>` topic.
+3. If it printed "ruleset not applied", merge any open PRs, wait for `check` on the default branch, then `scripts/sync.sh apply ruleset <name>`.
 
 ## PyPI trusted publisher (one-time, manual, per project)
 On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `giocaizzi`, repository, workflow file name (e.g. `python-publish.yml`), environment `pypi`. For a project not yet on PyPI, add a pending publisher under the account's Publishing page. Then create the `pypi` environment in the repo (Settings > Environments), delete any `PYPI_API_TOKEN` repository secret, and make the workflow `id-token: write` + `environment: pypi` with no token. Deploy secrets move to the deploy job's environment the same way. `scripts/sync.sh audit <repo>` must report `environments` and `pypi_publish` as passing.
@@ -37,9 +36,9 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 Delete the ruleset: `gh api -X DELETE repos/giocaizzi/<repo>/rulesets/<id>` (id from `gh api repos/giocaizzi/<repo>/rulesets`). Settings and labels are additive and need no rollback.
 
 ## Scheduled audit
-`.github/workflows/audit.yml` runs weekly, uploads `audit.json` as the artifact `audit` (kept 90 days) and opens or updates a `drift` issue. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration, Contents, Issues and Metadata on all repos).
+`.github/workflows/audit.yml` runs weekly with `--visibility public`, uploads `audit.json` as the artifact `audit` (kept 90 days) and opens or updates a `drift` issue; both are public, so they cover public repos only. Private repos are audited locally with `--visibility private`; their results are never stored on GitHub. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration, Contents, Issues and Metadata on all repos).
 
-The dashboard fetches the latest JSON:
+The dashboard fetches the latest public JSON from here and audits private repos itself with the owner's `gh` login (`scripts/sync.sh audit --json --visibility private`):
 ```bash
 url=$(gh api 'repos/giocaizzi/.github/actions/artifacts?name=audit&per_page=1' -q '.artifacts[0].archive_download_url')
 gh api "$url" > audit.zip && unzip -p audit.zip audit.json
