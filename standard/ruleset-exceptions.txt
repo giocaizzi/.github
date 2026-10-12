@@ -1,0 +1,2 @@
+# Repos without a main ruleset because a bot must push the default branch directly. One name per line; reason in docs/standard.md (Bots).
+giocaizzi

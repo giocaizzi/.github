@@ -56,6 +56,7 @@ if [ "$mode" = apply ]; then
         fi ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
+        grep -qx "$r" "$DIR/standard/ruleset-exceptions.txt" && { echo "skip ruleset $r (exception)"; continue; }
         id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
         if [ -n "$id" ]; then gh api -X PUT "repos/$OWNER/$r/rulesets/$id" --input "$DIR/standard/ruleset-main.json" >/dev/null
         else gh api "repos/$OWNER/$r/rulesets" --method POST --input "$DIR/standard/ruleset-main.json" >/dev/null; fi ;;
@@ -81,7 +82,7 @@ for r in "${repos[@]}"; do
     got=$(jq -r --arg k "$k" '.security_and_analysis[$k].status // "n/a"' <<<"$s")
     [ "$got" = enabled ] || out+=("$k: $got (want enabled)")
   done
-  if [ "$(jq -r .private <<<"$s")" = false ]; then
+  if [ "$(jq -r .private <<<"$s")" = false ] && ! grep -qx "$r" "$DIR/standard/ruleset-exceptions.txt"; then
     id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
     if [ -z "$id" ]; then out+=("ruleset main: missing")
     else
