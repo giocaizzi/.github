@@ -14,17 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # AUDIT_TOKEN: fine-grained PAT, read-only "Administration" + "Metadata" on all repos.
+      # AUDIT_TOKEN: fine-grained PAT, read-only "Administration", "Contents", "Issues" + "Metadata" on all repos.
       - name: Audit all repos
         env:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
         run: |
           set +e
-          scripts/sync.sh audit | tee audit.txt
-          rc=${PIPESTATUS[0]}
+          scripts/sync.sh audit --json > audit.json 2> audit.txt
+          rc=$?
+          cat audit.txt
           # 1 = drift (open/update the issue); anything else = the audit itself broke
           [ "$rc" = 1 ] && echo "drift=1" >> "$GITHUB_ENV"
           [ "$rc" = 0 ] || [ "$rc" = 1 ]
+      # Latest JSON for the dashboard: GET repos/giocaizzi/.github/actions/artifacts?name=audit
+      - uses: actions/upload-artifact@v7
+        with:
+          name: audit
+          path: audit.json
+          retention-days: 90
       - name: Open or update the drift issue
         if: env.drift == '1'
         env:
