@@ -105,6 +105,20 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
   local_claude() { has 'AGENTS\.md' && raw .gitignore | grep -qx /CLAUDE.md; }
   no_poetry() { ! has '(.*/)?poetry\.lock' && ! grep -q '^\[tool\.poetry' <<<"$py"; }
   own_or_inherited() { has "$1" || grep -qE "^($1)$" <<<"$gh_paths"; }
+  # workflow jobs with a publish/deploy step but no `environment:`; heuristic documented in docs/standard.md
+  unenv_jobs() { awk '
+    /^jobs:/ {j=1; next}
+    j && /^[^ #]/ {j=0}
+    j && /^  [A-Za-z0-9_-]+:/ {n=$1; sub(/:$/, "", n); next}
+    j && n {b[n]=b[n] "\n" $0}
+    END {for (n in b) if ((b[n] ~ /gh-action-pypi-publish|uv publish|docker push|deploy-pages|cosign sign|wrangler deploy|\/webhooks\/|(scp|rsync|ssh) / ||
+      (b[n] ~ /build-push-action/ && b[n] ~ /push: *(true|\$\{\{)/)) && b[n] !~ /\n    environment:/) print n}'; }
+  # a workflow that publishes to PyPI by trusted publishing in environment `pypi`, triggered by a release
+  pypi_wf_ok() {
+    grep -qE 'gh-action-pypi-publish|uv publish' <<<"$1" && grep -qE 'id-token: *write' <<<"$1" \
+      && { grep -qE 'environment: *pypi' <<<"$1" || grep -A2 'environment:' <<<"$1" | grep -qE 'name: *pypi'; } \
+      && grep -qE '^  release:|releases?_created' <<<"$1" && ! grep -qE 'PYPI_API_TOKEN|UV_PUBLISH_TOKEN|password:|--token' <<<"$1"
+  }
   setting() { # id key...
     local id=$1 d="" k want got; shift
     for k; do
@@ -211,6 +225,27 @@ for r in "${repos[@]}"; do
   for f in codecov.yml .codecov.yml; do
     has "${f//./\\.}" && chk codecov_informational typed "$(ok grep -q 'informational: true' <<<"$(raw "$f")")" "$f lacks informational: true"
   done
+
+  # environments / PyPI: environments exist on public repos (private ones need a paid plan)
+  pypi=$(jq -r '.pypi == "true"' <<<"${m:-null}"); deploys=$(jq -r '.deploys == "true"' <<<"${m:-null}")
+  if [ "$pypi" = true ] || [ "$deploys" = true ]; then
+    if [ "$priv" = true ]; then ex+="environments pypi_publish "
+    else
+      d="" pypi_ok=false
+      while IFS= read -r f; do
+        c=$(raw "$f")
+        while IFS= read -r j; do [ -n "$j" ] && d+="$f job $j has no environment; "; done < <(unenv_jobs <<<"$c")
+        pypi_wf_ok "$c" && pypi_ok=true
+      done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+      while IFS= read -r sec; do d+="repository secret $sec (use an environment secret); "; done \
+        < <(gh api "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' | grep -E 'PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER' || true)
+      chk environments typed "$(ok test -z "$d")" "${d%; }"
+      if [ "$pypi" = true ]; then
+        has release-please-config\\.json || pypi_ok=false
+        chk pypi_publish typed "$pypi_ok" "needs release-please and a release-triggered workflow publishing by trusted publishing (id-token: write, no token) in environment pypi"
+      fi
+    fi
+  fi
 
   # extra
   chk pre_commit extra "$(ok has '\.pre-commit-config\.ya?ml')"

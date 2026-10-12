@@ -1,19 +1,20 @@
 # Every in-scope repo, its type and whether it ships releases. The audit fails a repo missing from this list.
 # type: python | typescript | infra | config | docs. released: true = versioned releases (release-please required).
+# pypi: true = published on PyPI (typed check pypi_publish). deploys: true = has deploy/publish jobs (typed check environments; also applies when pypi: true).
 # exceptions: check ids with an alternative pass rule, documented in docs/standard.md (Exceptions).
-- {name: btc-cycles, type: python, released: true}
+- {name: btc-cycles, type: python, released: true, pypi: true, deploys: true}
 - {name: cover-letter, type: docs, released: false}
 - {name: CV, type: python, released: false}
 - {name: dotfiles, type: config, released: false}
 - {name: giocaizzi, type: docs, released: false}
 - {name: giocaizzi-xyz, type: typescript, released: true}
-- {name: greenhouse, type: python, released: true}
+- {name: greenhouse, type: python, released: true, deploys: true}
 - {name: harness, type: config, released: false}
-- {name: mplStrater, type: python, released: true}
+- {name: mplStrater, type: python, released: true, pypi: true}
 - {name: picow-ws2812, type: python, released: false}
-- {name: py3dinterpolations, type: python, released: true}
+- {name: py3dinterpolations, type: python, released: true, pypi: true}
 - {name: ralph-copilot, type: config, released: false}
-- {name: rp5-homeserver, type: infra, released: true, exceptions: [claude_symlink]}
+- {name: rp5-homeserver, type: infra, released: true, deploys: true, exceptions: [claude_symlink]}
 - {name: shortty, type: typescript, released: false}
 - {name: template, type: config, released: false}
 - {name: wiki, type: docs, released: false}

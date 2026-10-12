@@ -11,7 +11,7 @@ lint: ## shellcheck scripts, validate JSON
 test: ## Smoke-test: the audit script and standard/repos.yaml parse
 	bash -n scripts/sync.sh
 	grep -E '^- \{' standard/repos.yaml | sed -E 's/^- //; s/([A-Za-z0-9_.-]+)/"\1"/g' \
-	  | jq -se 'all(.[]; (.type | IN("python","typescript","infra","config","docs")) and (.released | IN("true","false")))' >/dev/null
+	  | jq -se 'all(.[]; (.type | IN("python","typescript","infra","config","docs")) and (.released | IN("true","false")) and all(.pypi, .deploys; . == null or . == "true"))' >/dev/null
 
 check: lint test ## lint + test
 
