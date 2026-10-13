@@ -36,7 +36,7 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 Delete the ruleset: `gh api -X DELETE repos/giocaizzi/<repo>/rulesets/<id>` (id from `gh api repos/giocaizzi/<repo>/rulesets`). Settings and labels are additive and need no rollback.
 
 ## Scheduled audit
-`.github/workflows/audit.yml` runs weekly with `--visibility public`, uploads `audit.json` as the artifact `audit` (kept 90 days) and opens or updates a `drift` issue; both are public, so they cover public repos only. Private repos are audited locally with `--visibility private`; their results are never stored on GitHub. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration, Contents, Issues and Metadata on all repos).
+`.github/workflows/audit.yml` runs weekly with `--visibility public`, uploads `audit.json` as the artifact `audit` (kept 90 days) and opens or updates a `drift` issue; both are public, so they cover public repos only. Private repos are audited locally with `--visibility private`; their results are never stored on GitHub. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration, Contents, Issues, Secrets and Metadata; Secrets lists names only, for the repository-secret check on all repos).
 
 The dashboard fetches the latest public JSON from here and audits private repos itself with the owner's `gh` login (`scripts/sync.sh audit --json --visibility private`):
 ```bash

@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # AUDIT_TOKEN: fine-grained PAT, read-only "Administration", "Contents", "Issues" + "Metadata" on all repos.
+      # AUDIT_TOKEN: fine-grained PAT, read-only "Administration", "Contents", "Issues", "Secrets" + "Metadata" on all repos.
       # Public repos only: this repo, its artifact and its issues are public. Private repos are audited locally.
       - name: Audit public repos
         env:
