@@ -140,6 +140,15 @@ results=""
 for r in "${repos[@]}"; do
   rec="" ex=""
   s=$(gh api "repos/$OWNER/$r")
+  # REST returns the merge settings as null to a read-only fine-grained token; GraphQL returns them
+  # shellcheck disable=SC2016 # $o, $n and $g are GraphQL and jq variables
+  s=$(jq -c --argjson g "$(gh api graphql -f o="$OWNER" -f n="$r" -q .data.repository -f query='
+    query($o: String!, $n: String!) { repository(owner: $o, name: $n) { squashMergeAllowed mergeCommitAllowed
+      rebaseMergeAllowed deleteBranchOnMerge autoMergeAllowed squashMergeCommitTitle squashMergeCommitMessage } }')" '
+    . + {allow_squash_merge: $g.squashMergeAllowed, allow_merge_commit: $g.mergeCommitAllowed,
+      allow_rebase_merge: $g.rebaseMergeAllowed, delete_branch_on_merge: $g.deleteBranchOnMerge,
+      allow_auto_merge: $g.autoMergeAllowed, squash_merge_commit_title: $g.squashMergeCommitTitle,
+      squash_merge_commit_message: $g.squashMergeCommitMessage}' <<<"$s")
   priv=$(jq -r .private <<<"$s")
   base=$(jq -r .default_branch <<<"$s")
   entries=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1" -q '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"')
