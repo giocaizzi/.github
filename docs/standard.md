@@ -67,23 +67,10 @@ Environments and environment secrets are available on public repos on every plan
 Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink to it, tracked as a git symlink) and `docs/`; this standard is linked, not copied.
 
 ## Agent config
-Shared agent config is committed; personal and machine state is not. The repo's own `.gitignore` carries the ignore block, since a global excludes file reaches neither other clones nor CI. `giocaizzi/template` ships it. Documented only, not audited.
+Shared agent config is committed; personal and machine state is not. The repo's own `.gitignore` carries the ignore lines of `standard/gitignore-agents`, since a global excludes file reaches neither other clones nor CI. `giocaizzi/template` ships them; the audit checks them (`agent_ignore`) and `sync.sh apply gitignore` opens a PR adding the missing ones.
 
 - **Track:** `AGENTS.md`, `CLAUDE.md`; `.claude/` (`settings.json`, `agents`, `commands`, `skills`, `rules`, `output-styles`, `workflows`, `agent-memory`); `.mcp.json`; `.worktreeinclude`; `.github/` (`copilot-instructions.md`, `instructions`, `agents`, `skills`, `prompts`, `hooks`, `mcp.json`, `copilot/settings.json`); `.vscode/settings.json`, `.vscode/mcp.json`; `.codex/`; `.agents/skills`, `skills-lock.json`; `opencode.json(c)`, `.opencode/`; `.pi/` (`settings.json`, `mcp.json`, `extensions`, `skills`, `prompts`, `themes`).
-- **Ignore:**
-
-```gitignore
-# AI coding agents: personal and machine state (shared config is tracked)
-.claude/settings.local.json
-.claude/worktrees/
-.claude/agent-memory-local/
-CLAUDE.local.md
-.github/copilot/settings.local.json
-.opencode/node_modules/
-.opencode/plans/
-.pi/npm/
-.pi/git/
-```
+- **Ignore:** every line of `standard/gitignore-agents` (local settings, Claude worktrees and local agent memory, `CLAUDE.local.md`, Copilot CLI local settings, opencode and pi install dirs).
 
 Worktrees: Claude Code creates them inside the repo (`.claude/worktrees/`, hence the entry); Copilot CLI, Codex and opencode create them outside it. opencode also writes `.opencode/.gitignore` for its own dependencies. Sources: [Claude Code](https://code.claude.com/docs/en/claude-directory), [Copilot CLI](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference), [VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), [Codex](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [opencode](https://opencode.ai/docs/config), [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md).
 
@@ -92,7 +79,7 @@ Each repo carries its metadata as GitHub topics, so no list of repos lives here:
 
 ## Audit
 `scripts/sync.sh audit` reports three kinds of checks; standard and typed failures are drift (exit 1), extras never are.
-- **Standard** (every repo): exactly one `std-<type>` topic (`repo_type`); `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` + `CLAUDE.md` symlink; squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
+- **Standard** (every repo): exactly one `std-<type>` topic (`repo_type`); `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title` and `label-guard` workflows; Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` + `CLAUDE.md` symlink; the agent-config lines in `.gitignore` (`agent_ignore`); squash-only, delete-branch; no poetry; labels; `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
 - **Typed** (when applicable): tests (python, typescript); `uv.lock` + ruff + mypy + pytest (python); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released), plus `uv.lock` in its `extra-files` when the repo has one (`uv_lock_release`: release-please does not bump the version `uv.lock` records; select each `[[package]]` with `$.package[?(@.name.value=='<name>')].version`); `informational: true` (when `codecov.yml` exists); `environments` and `pypi_publish` (public repos only).
   - `environments` (`deploys: true` or `pypi: true`): every job in `.github/workflows/*.yml` with a publish/deploy step declares `environment:`. A step counts as publish/deploy when the job contains `gh-action-pypi-publish`, `uv publish`, `docker push`, `deploy-pages`, `cosign sign`, `wrangler deploy`, a `/webhooks/` call, `scp`/`rsync`/`ssh`, or `docker/build-push-action` with `push: true`. Repository secrets named like `PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER` also fail it (names only).
   - `pypi_publish` (`pypi: true`): `release-please-config.json` plus a workflow that publishes with `pypa/gh-action-pypi-publish` or `uv publish`, `id-token: write`, no token, `environment: pypi`, triggered by `release:` or a release-please output.
