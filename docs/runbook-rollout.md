@@ -18,7 +18,7 @@ One object per repo: `repo`, `type`, `released`, `private`, `exempt` (check ids 
 
 ## New repo
 1. Create it from the template: `gh repo create giocaizzi/<name> --template giocaizzi/template --public --clone` (starts with CI `check`, PR-title and label-guard workflows, Dependabot, Makefile, AGENTS.md + CLAUDE.md, LICENSE).
-2. `make onboard REPO=<name> TYPE=<python|typescript|infra|config|docs> [FLAGS=released,pypi,deploys]` here: adds the `std-<type>` and `std-<flag>` topics (existing topics kept), applies settings, labels and workflows, applies the ruleset once `check` is green on the default branch, then audits the repo. The audit fails a repo without exactly one `std-<type>` topic.
+2. `make onboard REPO=<name> TYPE=<python|typescript|infra|config|docs> [FLAGS=released,pypi,deploys]` here: adds the `std-<type>` and `std-<flag>` topics (existing topics kept), applies settings, labels, workflows and the agent ignore lines, applies the ruleset once `check` is green on the default branch, then audits the repo. The audit fails a repo without exactly one `std-<type>` topic.
 3. If it printed "ruleset not applied", merge any open PRs, wait for `check` on the default branch, then `scripts/sync.sh apply ruleset <name>`.
 
 ## PyPI trusted publisher (one-time, manual, per project)
@@ -28,9 +28,10 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 1. **Settings**: `scripts/sync.sh apply settings <repo>` (repo settings; secret scanning and private vulnerability reporting on public repos).
 2. **Labels**: `gh label create <name> --color <hex> --description <text> --force -R giocaizzi/<repo>` for each entry in `standard/labels.yaml`.
 3. **Workflows**: `scripts/sync.sh apply workflows <repo>` opens a PR with `standard/workflows/*` (PR title check); merge it.
-4. **CI**: land a `check` job (and `make check`) in the repo first, via PR.
-5. **Ruleset**: only after `check` and `Validate PR title` have run green once: `gh api repos/giocaizzi/<repo>/rulesets --method POST --input standard/ruleset-main.json`. Applying earlier blocks every merge.
-6. Re-run the audit; it must report `ok` for the repo.
+4. **Agent ignore**: `scripts/sync.sh apply gitignore <repo>` opens a PR appending the missing `standard/gitignore-agents` lines to `.gitignore`; merge it.
+5. **CI**: land a `check` job (and `make check`) in the repo first, via PR.
+6. **Ruleset**: only after `check` and `Validate PR title` have run green once: `gh api repos/giocaizzi/<repo>/rulesets --method POST --input standard/ruleset-main.json`. Applying earlier blocks every merge.
+7. Re-run the audit; it must report `ok` for the repo.
 
 ## Rollback
 Delete the ruleset: `gh api -X DELETE repos/giocaizzi/<repo>/rulesets/<id>` (id from `gh api repos/giocaizzi/<repo>/rulesets`). Settings and labels are additive and need no rollback.

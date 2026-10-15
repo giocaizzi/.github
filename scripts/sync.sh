@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
+# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
 # `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope. `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
@@ -15,7 +15,7 @@ if [ "$mode" = onboard ]; then
   gh api "repos/$OWNER/$r/topics" -q .names | jq --arg t "$t" --arg f "${4:-}" \
     '{names: (. + ([$t] + ($f | split(",")) | map(select(length > 0) | "std-" + .)) | unique)}' \
     | gh api -X PUT "repos/$OWNER/$r/topics" --input - >/dev/null
-  for w in settings labels workflows; do "$0" apply "$w" "$r"; done
+  for w in settings labels workflows gitignore; do "$0" apply "$w" "$r"; done
   base=$(gh api "repos/$OWNER/$r" -q .default_branch)
   sha=$(gh api "repos/$OWNER/$r/commits/$base" -q .sha)
   ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
@@ -23,7 +23,7 @@ if [ "$mode" = onboard ]; then
   else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
   exec "$0" audit "$r"
 fi
-case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
+case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
 shift
 json=0 vis=all
 while [ "$mode" = audit ] && [ $# -gt 0 ]; do
@@ -79,6 +79,21 @@ if [ "$mode" = apply ]; then
           gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "ci: add standard workflows" \
           --body "Adds the standard workflows from giocaizzi/.github (\`standard/workflows/\`), e.g. the required \`Validate PR title\` check." >/dev/null 2>&1 || true
         fi ;;
+      gitignore)
+        # Opens a PR appending the missing standard/gitignore-agents lines to .gitignore on `chore/standard-gitignore`.
+        base=$(gh api "repos/$OWNER/$r" -q .default_branch)
+        body=$(gh api "repos/$OWNER/$r/contents/.gitignore?ref=$base" -H 'Accept: application/vnd.github.raw' 2>/dev/null || true)
+        missing=$(grep -vxF -f <(printf '%s\n' "$body") <(grep -v '^#' "$DIR/standard/gitignore-agents") || true)
+        [ -z "$missing" ] && { echo "gitignore $r: up to date"; continue; }
+        sha=$(gh api "repos/$OWNER/$r/git/ref/heads/$base" -q .object.sha)
+        branch=chore/standard-gitignore
+        gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
+        new=$(printf '%s\n\n%s\n%s\n' "${body%$'\n'}" "$(head -1 "$DIR/standard/gitignore-agents")" "$missing" | sed '/./,$!d')
+        fsha=$(gh api "repos/$OWNER/$r/contents/.gitignore?ref=$branch" -q .sha 2>/dev/null || true)
+        gh api -X PUT "repos/$OWNER/$r/contents/.gitignore" -f branch="$branch" -f message="chore: ignore local agent state" \
+          -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${fsha:+-f sha="$fsha"} >/dev/null
+        gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: ignore local agent state" \
+          --body "Adds the agent-config ignore lines from giocaizzi/.github (\`standard/gitignore-agents\`, docs/standard.md Agent config): personal overrides, Claude worktrees and agent install dirs stay out of git; shared agent config stays tracked." >/dev/null 2>&1 || true ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         grep -qx "$r" "$DIR/standard/ruleset-exceptions.txt" && { echo "skip ruleset $r (exception)"; continue; }
@@ -108,6 +123,7 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
   raw() { if has "${1//./\\.}"; then gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; fi; }
   excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
+  agent_ignore_missing() { grep -vxF -f <(raw .gitignore) <(grep -v '^#' "$DIR/standard/gitignore-agents") || true; }
   local_claude() { has 'AGENTS\.md' && raw .gitignore | grep -qx /CLAUDE.md; }
   no_poetry() { ! has '(.*/)?poetry\.lock' && ! grep -q '^\[tool\.poetry' <<<"$py"; }
   own_or_inherited() { has "$1" || grep -qE "^($1)$" <<<"$gh_paths"; }
@@ -188,6 +204,8 @@ for r in "${repos[@]}"; do
     END {for (i = 1; i <= n; i++) if (!p[i]) b++; print n+0, b+0}')
   chk dependabot_prefix standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without a Conventional Commit commit-message.prefix"
   chk agents_md standard "$(ok has AGENTS\\.md)" "no AGENTS.md"
+  d=$(agent_ignore_missing | paste -sd, -)
+  chk agent_ignore standard "$(ok test -z "$d")" "missing in .gitignore: $d (sync.sh apply gitignore)"
   if excepted claude_symlink; then # local untracked symlink, gitignored (docs/standard.md Exceptions)
     chk claude_symlink standard "$(ok local_claude)" "want AGENTS.md and /CLAUDE.md in .gitignore"
   else chk claude_symlink standard "$(ok grep -qx "120000 $link_sha CLAUDE.md" <<<"$entries")" "CLAUDE.md is not a symlink to AGENTS.md"; fi
