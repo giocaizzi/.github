@@ -66,6 +66,27 @@ Environments and environment secrets are available on public repos on every plan
 ## Per-repo docs
 Each repo has `AGENTS.md` (+ `CLAUDE.md` symlink to it, tracked as a git symlink) and `docs/`; this standard is linked, not copied.
 
+## Agent config
+Shared agent config is committed; personal and machine state is not. The repo's own `.gitignore` carries the ignore block, since a global excludes file reaches neither other clones nor CI. `giocaizzi/template` ships it. Documented only, not audited.
+
+- **Track:** `AGENTS.md`, `CLAUDE.md`; `.claude/` (`settings.json`, `agents`, `commands`, `skills`, `rules`, `output-styles`, `workflows`, `agent-memory`); `.mcp.json`; `.worktreeinclude`; `.github/` (`copilot-instructions.md`, `instructions`, `agents`, `skills`, `prompts`, `hooks`, `mcp.json`, `copilot/settings.json`); `.vscode/settings.json`, `.vscode/mcp.json`; `.codex/`; `.agents/skills`, `skills-lock.json`; `opencode.json(c)`, `.opencode/`; `.pi/` (`settings.json`, `mcp.json`, `extensions`, `skills`, `prompts`, `themes`).
+- **Ignore:**
+
+```gitignore
+# AI coding agents: personal and machine state (shared config is tracked)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/agent-memory-local/
+CLAUDE.local.md
+.github/copilot/settings.local.json
+.opencode/node_modules/
+.opencode/plans/
+.pi/npm/
+.pi/git/
+```
+
+Worktrees: Claude Code creates them inside the repo (`.claude/worktrees/`, hence the entry); Copilot CLI, Codex and opencode create them outside it. opencode also writes `.opencode/.gitignore` for its own dependencies. Sources: [Claude Code](https://code.claude.com/docs/en/claude-directory), [Copilot CLI](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference), [VS Code](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), [Codex](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [opencode](https://opencode.ai/docs/config), [pi](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/configuration.md).
+
 ## Repo types (topics)
 Each repo carries its metadata as GitHub topics, so no list of repos lives here: exactly one `std-<type>` (`std-python`, `std-typescript`, `std-infra`, `std-config`, `std-docs`), plus the flags `std-released` (ships versioned releases), `std-pypi` (published on PyPI) and `std-deploys` (has publish/deploy jobs), and `std-exception-<check>` for a documented [exception](#exceptions) (check id with `-` for `_`, e.g. `std-exception-claude-symlink`). The type decides which typed rules apply; `std-pypi` and `std-deploys` switch on the checks in [Environments and publishing](#environments-and-publishing). `make onboard` sets them; change them with `gh repo edit giocaizzi/<repo> --add-topic|--remove-topic`. `scripts/meta.jq` parses them.
 
