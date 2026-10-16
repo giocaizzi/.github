@@ -25,7 +25,7 @@ One object per repo: `repo`, `type`, `released`, `private`, `exempt` (check ids 
 On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `giocaizzi`, repository, workflow file name (e.g. `python-publish.yml`), environment `pypi`. For a project not yet on PyPI, add a pending publisher under the account's Publishing page. Then create the `pypi` environment in the repo (Settings > Environments), delete any `PYPI_API_TOKEN` repository secret, and make the workflow `id-token: write` + `environment: pypi` with no token. Deploy secrets move to the deploy job's environment the same way. `scripts/sync.sh audit <repo>` must report `environments` and `pypi_publish` as passing.
 
 ## Apply, in this order (low risk first)
-1. **Settings**: `scripts/sync.sh apply settings <repo>` (repo settings; secret scanning and private vulnerability reporting on public repos).
+1. **Settings**: `scripts/sync.sh apply settings <repo>` (repo settings and Dependabot alerts + security updates on every repo; secret scanning and private vulnerability reporting on public repos).
 2. **Labels**: `gh label create <name> --color <hex> --description <text> --force -R giocaizzi/<repo>` for each entry in `standard/labels.yaml`.
 3. **Workflows**: `scripts/sync.sh apply workflows <repo>` opens a PR with `standard/workflows/*` (PR title check); merge it.
 4. **Agent ignore**: `scripts/sync.sh apply gitignore <repo>` opens a PR appending the missing `standard/gitignore-agents` lines to `.gitignore`; merge it.
