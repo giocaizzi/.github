@@ -10,8 +10,8 @@ lint: ## shellcheck scripts, validate JSON
 
 test: ## Smoke-test: the audit script parses, the topic parser reads type and flags
 	bash -n scripts/sync.sh
-	echo '{"topics":["gis","std-python","std-released","std-exception-claude-symlink"]}' | jq -ef scripts/meta.jq \
-	  | jq -e '.type == "python" and .released and (.pypi | not) and .exceptions == ["claude_symlink"]' >/dev/null
+	echo '{"topics":["gis","std-python","std-released","std-exception-agent-ignore"]}' | jq -ef scripts/meta.jq \
+	  | jq -e '.type == "python" and .released and (.pypi | not) and .exceptions == ["agent_ignore"]' >/dev/null
 	echo '{"topics":["std-python","std-docs"]}' | jq -ef scripts/meta.jq | jq -e '.type == "unknown"' >/dev/null
 
 check: lint test ## lint + test
