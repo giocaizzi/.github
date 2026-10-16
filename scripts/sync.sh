@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
+# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
 # `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope. `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
@@ -15,7 +15,7 @@ if [ "$mode" = onboard ]; then
   gh api "repos/$OWNER/$r/topics" -q .names | jq --arg t "$t" --arg f "${4:-}" \
     '{names: (. + ([$t] + ($f | split(",")) | map(select(length > 0) | "std-" + .)) | unique)}' \
     | gh api -X PUT "repos/$OWNER/$r/topics" --input - >/dev/null
-  for w in settings labels workflows gitignore; do "$0" apply "$w" "$r"; done
+  for w in settings labels workflows gitignore claude-md; do "$0" apply "$w" "$r"; done
   base=$(gh api "repos/$OWNER/$r" -q .default_branch)
   sha=$(gh api "repos/$OWNER/$r/commits/$base" -q .sha)
   ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
@@ -23,7 +23,7 @@ if [ "$mode" = onboard ]; then
   else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
   exec "$0" audit "$r"
 fi
-case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
+case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
 shift
 json=0 vis=all
 while [ "$mode" = audit ] && [ $# -gt 0 ]; do
@@ -94,6 +94,24 @@ if [ "$mode" = apply ]; then
           -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${fsha:+-f sha="$fsha"} >/dev/null
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: ignore local agent state" \
           --body "Adds the agent-config ignore lines from giocaizzi/.github (\`standard/gitignore-agents\`, docs/standard.md Agent config): personal overrides, Claude worktrees and agent install dirs stay out of git; shared agent config stays tracked." >/dev/null 2>&1 || true ;;
+      claude-md)
+        # Opens a PR on `chore/standard-agents-md` deleting every tracked CLAUDE.md that is a symlink to AGENTS.md; reports the others.
+        base=$(gh api "repos/$OWNER/$r" -q .default_branch)
+        link=$(printf AGENTS.md | git hash-object --stdin) # blob of a symlink pointing to AGENTS.md
+        files=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1" -q '.tree[] | select(.path | test("(^|/)CLAUDE\\.md$")) | "\(.mode) \(.sha) \(.path)"')
+        [ -z "$files" ] && { echo "claude-md $r: none"; continue; }
+        awk -v s="$link" -v r="$r" '!($1 == "120000" && $2 == s) {print "claude-md " r ": not a symlink to AGENTS.md, merge it by hand: " $3}' <<<"$files"
+        links=$(awk -v s="$link" '$1 == "120000" && $2 == s {print $3}' <<<"$files")
+        [ -z "$links" ] && continue
+        sha=$(gh api "repos/$OWNER/$r/git/ref/heads/$base" -q .object.sha)
+        branch=chore/standard-agents-md
+        gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
+        while IFS= read -r f; do
+          fsha=$(gh api "repos/$OWNER/$r/contents/$f?ref=$branch" -q .sha 2>/dev/null) || continue
+          gh api -X DELETE "repos/$OWNER/$r/contents/$f" -f branch="$branch" -f message="chore: drop the $f symlink" -f sha="$fsha" >/dev/null
+        done <<<"$links"
+        gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: drop the CLAUDE.md symlinks" \
+          --body "Claude Code reads AGENTS.md when no CLAUDE.md exists (giocaizzi/.github docs/standard.md, Per-repo docs), so the symlinks go." >/dev/null 2>&1 || true ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         grep -qx "$r" "$DIR/standard/ruleset-exceptions.txt" && { echo "skip ruleset $r (exception)"; continue; }
@@ -111,7 +129,6 @@ fi
 # Checks: standard (always, drift), typed (by topic type/flags and repo contents, drift), extra (presence only, never drift).
 [ $json = 1 ] && exec 3>&1 1>&2 # JSON on fd 3 (stdout), text report on stderr
 std=$(cat "$DIR/standard/repo-settings.json")
-link_sha=$(printf AGENTS.md | git hash-object --stdin) # blob of a symlink pointing to AGENTS.md
 gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].path') # inherited community health files
 
 # Helpers read the current repo's globals ($r, $paths, $entries, $m, ...).
@@ -124,7 +141,7 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
   excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
   agent_ignore_missing() { grep -vxF -f <(raw .gitignore) <(grep -v '^#' "$DIR/standard/gitignore-agents") || true; }
-  local_claude() { has 'AGENTS\.md' && raw .gitignore | grep -qx /CLAUDE.md; }
+  no_claude_md() { ! has '(.*/)?CLAUDE\.md'; }
   no_poetry() { ! has '(.*/)?poetry\.lock' && ! grep -q '^\[tool\.poetry' <<<"$py"; }
   own_or_inherited() { has "$1" || grep -qE "^($1)$" <<<"$gh_paths"; }
   # workflow jobs with a publish/deploy step but no `environment:`; heuristic documented in docs/standard.md
@@ -206,9 +223,7 @@ for r in "${repos[@]}"; do
   chk agents_md standard "$(ok has AGENTS\\.md)" "no AGENTS.md"
   d=$(agent_ignore_missing | paste -sd, -)
   chk agent_ignore standard "$(ok test -z "$d")" "missing in .gitignore: $d (sync.sh apply gitignore)"
-  if excepted claude_symlink; then # local untracked symlink, gitignored (docs/standard.md Exceptions)
-    chk claude_symlink standard "$(ok local_claude)" "want AGENTS.md and /CLAUDE.md in .gitignore"
-  else chk claude_symlink standard "$(ok grep -qx "120000 $link_sha CLAUDE.md" <<<"$entries")" "CLAUDE.md is not a symlink to AGENTS.md"; fi
+  chk no_claude_md standard "$(ok no_claude_md)" "tracked CLAUDE.md: Claude Code then skips AGENTS.md (sync.sh apply claude-md)"
   setting squash_only allow_squash_merge allow_merge_commit allow_rebase_merge squash_merge_commit_title squash_merge_commit_message
   setting delete_branch delete_branch_on_merge
   if [ "$priv" = true ]; then ex+="auto_merge ruleset_main secret_scanning vuln_reporting " # free plan: unavailable

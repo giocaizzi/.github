@@ -17,7 +17,7 @@ scripts/sync.sh audit --json greenhouse # one repo
 One object per repo: `repo`, `type`, `released`, `private`, `exempt` (check ids that do not apply), `checks` (`{id: {kind, pass, detail?}}`), `extras` (`{id: {kind, present}}`), `score` (`standard`, `typed`, `extras` as `n/m`).
 
 ## New repo
-1. Create it from the template: `gh repo create giocaizzi/<name> --template giocaizzi/template --public --clone` (starts with CI `check`, PR-title and label-guard workflows, Dependabot, Makefile, AGENTS.md + CLAUDE.md, LICENSE).
+1. Create it from the template: `gh repo create giocaizzi/<name> --template giocaizzi/template --public --clone` (starts with CI `check`, PR-title and label-guard workflows, Dependabot, Makefile, AGENTS.md, LICENSE).
 2. `make onboard REPO=<name> TYPE=<python|typescript|infra|config|docs> [FLAGS=released,pypi,deploys]` here: adds the `std-<type>` and `std-<flag>` topics (existing topics kept), applies settings, labels, workflows and the agent ignore lines, applies the ruleset once `check` is green on the default branch, then audits the repo. The audit fails a repo without exactly one `std-<type>` topic.
 3. If it printed "ruleset not applied", merge any open PRs, wait for `check` on the default branch, then `scripts/sync.sh apply ruleset <name>`.
 
