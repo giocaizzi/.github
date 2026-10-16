@@ -45,6 +45,9 @@ if [ "$mode" = apply ]; then
     case $what in
       settings)
         jq --argjson priv "$(gh api "repos/$OWNER/$r" -q .private)" 'del(.security_and_analysis, .private_vulnerability_reporting) | if $priv then del(.allow_auto_merge) else . end' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
+        # Dependabot alerts, then security updates (needs alerts): free on every repo
+        gh api -X PUT "repos/$OWNER/$r/vulnerability-alerts" >/dev/null
+        gh api -X PUT "repos/$OWNER/$r/automated-security-fixes" >/dev/null
         # free plan: private repos get no secret scanning, auto-merge or rulesets; CI runs gitleaks instead
         if [ "$(gh api "repos/$OWNER/$r" -q .private)" = false ]; then
           jq '{security_and_analysis}' "$DIR/standard/repo-settings.json" | gh api -X PATCH "repos/$OWNER/$r" --input - >/dev/null
@@ -226,6 +229,8 @@ for r in "${repos[@]}"; do
   chk no_claude_md standard "$(ok no_claude_md)" "tracked CLAUDE.md: Claude Code then skips AGENTS.md (sync.sh apply claude-md)"
   setting squash_only allow_squash_merge allow_merge_commit allow_rebase_merge squash_merge_commit_title squash_merge_commit_message
   setting delete_branch delete_branch_on_merge
+  chk dependabot_alerts standard "$(ok gh api "repos/$OWNER/$r/vulnerability-alerts" --silent 2>/dev/null)" "Dependabot alerts disabled"
+  chk dependabot_security_updates standard "$(gh api "repos/$OWNER/$r/automated-security-fixes" -q .enabled 2>/dev/null || echo false)" "Dependabot security updates disabled"
   if [ "$priv" = true ]; then ex+="auto_merge ruleset_main secret_scanning vuln_reporting " # free plan: unavailable
   else
     setting auto_merge allow_auto_merge
