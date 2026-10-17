@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
+# Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|todos|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
 # `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope. `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
@@ -23,7 +23,7 @@ if [ "$mode" = onboard ]; then
   else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
   exec "$0" audit "$r"
 fi
-case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
+case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|todos|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
 shift
 json=0 vis=all
 while [ "$mode" = audit ] && [ $# -gt 0 ]; do
@@ -124,6 +124,9 @@ if [ "$mode" = apply ]; then
         done <<<"$links"
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: drop the CLAUDE.md symlinks" \
           --body "Claude Code reads AGENTS.md when no CLAUDE.md exists (giocaizzi/.github docs/standard.md, Per-repo docs), so the symlinks go." >/dev/null 2>&1 || true ;;
+      todos)
+        # Bootstrap: a manual todo-issues run imports every TODO since the first commit (needs the workflow on the default branch).
+        gh workflow run todo-issues.yml -R "$OWNER/$r" 2>/dev/null || { echo "skip todos $r: no todo-issues workflow on the default branch yet"; continue; } ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         grep -qx "$r" "$DIR/standard/ruleset-exceptions.txt" && { echo "skip ruleset $r (exception)"; continue; }
