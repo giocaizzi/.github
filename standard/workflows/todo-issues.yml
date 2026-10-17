@@ -1,0 +1,20 @@
+name: TODO issues
+
+# Copied verbatim into every repo by `sync.sh apply workflows`.
+# Opens a `todo` issue for each TODO comment a push to main adds, and closes it when the comment is removed.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  todo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: alstr/todo-to-issue-action@v5
+        with:
+          IDENTIFIERS: '[{"name": "TODO", "labels": ["todo"]}]'
