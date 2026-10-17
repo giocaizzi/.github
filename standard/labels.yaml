@@ -1,4 +1,4 @@
-# Canonical label set. `sync.sh apply labels` creates/updates these and deletes any other label; the label-guard workflow deletes non-standard labels as soon as they are created.
+# Canonical label set. `sync.sh apply labels` creates/updates these plus the repo's own `.github/labels.yaml` extras (same format) and deletes any other label; the label-guard workflow deletes such a label as soon as it is created.
 # Type
 - {name: bug, color: d73a4a, description: "Something isn't working"}
 - {name: enhancement, color: a2eeef, description: "New feature or request"}
@@ -13,7 +13,7 @@
 - {name: P3, color: fbca04, description: "Nice to have"}
 # Cross-cutting
 - {name: parity, color: 0e8a16, description: "Gap between harnesses (Claude Code, Copilot CLI) or hosts (macOS, Linux, Windows)"}
-# Automation (Dependabot, release-please)
+# Automation (Dependabot, release-please, todo-issues workflow)
 - {name: dependencies, color: 0366d6, description: "Pull requests that update a dependency file"}
 - {name: github_actions, color: "000000", description: "Pull requests that update GitHub Actions code"}
 - {name: javascript, color: 168700, description: "Pull requests that update javascript code"}
@@ -22,4 +22,3 @@
 - {name: todo, color: fbca04, description: "Created from a TODO comment by automation"}
 - {name: "autorelease: pending", color: ededed, description: "release-please: release PR open"}
 - {name: "autorelease: tagged", color: ededed, description: "release-please: tagged release"}
-- {name: drift, color: b60205, description: "A repo deviates from the GitHub standard"}

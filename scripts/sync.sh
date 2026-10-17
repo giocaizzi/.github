@@ -38,7 +38,16 @@ repos=("$@")
 [ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
 
-want_labels=$(grep -oE 'name: ("[^"]+"|[^,}]+)' "$DIR/standard/labels.yaml" | sed -E 's/name: //; s/"//g')
+label_names() { { grep -oE 'name: ("[^"]+"|[^,}]+)' || true; } | sed -E 's/name: //; s/"//g'; }
+want_labels=$(label_names < "$DIR/standard/labels.yaml")
+# create or update the labels.yaml lines on stdin in repo $r; `extra` skips a name the standard defines
+create_labels() {
+  while IFS= read -r l; do
+    n=$(sed -E 's/^- \{name: "?([^",]+)"?,.*/\1/' <<<"$l"); c=$(sed -E 's/.*color: "?([0-9a-fA-F]+)"?,.*/\1/' <<<"$l"); d=$(sed -E 's/.*description: "([^"]*)"\}.*/\1/' <<<"$l")
+    if [ "$1" = extra ] && grep -qxF "$n" <<<"$want_labels"; then echo "skip label $n in $r: redefines a standard label"; continue; fi
+    gh label create "$n" --color "$c" --description "$d" --force -R "$OWNER/$r" >/dev/null
+  done
+}
 
 if [ "$mode" = apply ]; then
   for r in "${repos[@]}"; do
@@ -54,14 +63,14 @@ if [ "$mode" = apply ]; then
           gh api -X PUT "repos/$OWNER/$r/private-vulnerability-reporting" >/dev/null
         fi ;;
       labels)
-        yq_names=$(grep -E '^- \{' "$DIR/standard/labels.yaml")
-        while IFS= read -r l; do
-          n=$(sed -E 's/^- \{name: "?([^",]+)"?,.*/\1/' <<<"$l"); c=$(sed -E 's/.*color: "?([0-9a-fA-F]+)"?,.*/\1/' <<<"$l"); d=$(sed -E 's/.*description: "([^"]*)"\}.*/\1/' <<<"$l")
-          gh label create "$n" --color "$c" --description "$d" --force -R "$OWNER/$r" >/dev/null
-        done <<<"$yq_names"
-        # prune: delete every label not in the standard (removes it from issues/PRs too)
+        # the standard, then the repo's own extras (.github/labels.yaml, same format); an extra never redefines a standard label
+        extra=$(gh api "repos/$OWNER/$r/contents/.github/labels.yaml" -H 'Accept: application/vnd.github.raw' 2>/dev/null || true)
+        allowed=$(printf '%s\n%s\n' "$want_labels" "$(label_names <<<"$extra")")
+        grep -E '^- \{' "$DIR/standard/labels.yaml" | create_labels standard
+        { grep -E '^- \{' <<<"$extra" || true; } | create_labels extra
+        # prune: delete every label not in the standard or the repo's extras (removes it from issues/PRs too)
         gh label list -R "$OWNER/$r" --limit 500 --json name -q '.[].name' | while IFS= read -r l; do
-          grep -qxF "$l" <<<"$want_labels" || gh label delete "$l" --yes -R "$OWNER/$r" >/dev/null
+          grep -qxF "$l" <<<"$allowed" || gh label delete "$l" --yes -R "$OWNER/$r" >/dev/null
         done ;;
       workflows)
         # Opens a PR adding/updating standard/workflows/* on a `chore/standard-workflows` branch. Merge it, then apply the ruleset.
@@ -202,7 +211,7 @@ for r in "${repos[@]}"; do
   else chk ci_check_job standard "$(ok job_ok)" "check job lacks needs + if: always()"; fi
   chk make_check standard "$(ok grep -qE '^check:' <<<"$mk")" "Makefile has no check target"
   chk gitleaks standard "$(ok grep -q gitleaks <<<"$ci")" "ci.yml does not run gitleaks"
-  for w in pr-title label-guard; do
+  for w in pr-title label-guard todo-issues; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
     chk "${w/-/_}" standard "$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")" "workflow drift: $w.yml"
   done
@@ -249,8 +258,12 @@ for r in "${repos[@]}"; do
     chk vuln_reporting standard "$(gh api "repos/$OWNER/$r/private-vulnerability-reporting" -q .enabled 2>/dev/null || echo false)" "private vulnerability reporting disabled"
   fi
   have=$(gh label list -R "$OWNER/$r" --limit 200 --json name -q '.[].name')
-  d=$( { grep -vxF -f <(printf '%s\n' "$have") <<<"$want_labels" | sed 's/^/label missing: /' || true
-         grep -vxF -f <(printf '%s\n' "$want_labels") <<<"$have" | sed 's/^/label extra: /' || true; } | paste -sd';' - | sed 's/;/; /g')
+  extra=$(raw .github/labels.yaml | label_names) # the repo's own extras; one the standard defines is a conflict
+  allowed=$(printf '%s\n%s\n' "$want_labels" "$extra" | sed '/^$/d')
+  d=$( { grep -vxF -f <(printf '%s\n' "$have") <<<"$allowed" | sed 's/^/label missing: /' || true
+         grep -vxF -f <(printf '%s\n' "$allowed") <<<"$have" | sed 's/^/label extra: /' || true
+         grep -xF -f <(printf '%s\n' "$want_labels") <<<"$extra" | sed 's|^|label redefines standard in .github/labels.yaml: |' || true
+       } | paste -sd';' - | sed 's/;/; /g')
   chk labels standard "$(ok test -z "$d")" "$d"
   chk no_poetry standard "$(ok no_poetry)" "poetry in use (poetry.lock or [tool.poetry])"
   chk security_md standard "$(ok own_or_inherited '(\.github/|docs/)?SECURITY\.md')" "no SECURITY.md (own or inherited)"
