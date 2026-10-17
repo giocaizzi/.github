@@ -125,7 +125,7 @@ if [ "$mode" = apply ]; then
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: drop the CLAUDE.md symlinks" \
           --body "Claude Code reads AGENTS.md when no CLAUDE.md exists (giocaizzi/.github docs/standard.md, Per-repo docs), so the symlinks go." >/dev/null 2>&1 || true ;;
       todos)
-        # Bootstrap: a manual todo-issues run imports every TODO since the first commit (needs the workflow on the default branch).
+        # Bootstrap: a manual todo-issues run imports the to-do comments since the first commit (needs the workflow on the default branch).
         gh workflow run todo-issues.yml -R "$OWNER/$r" 2>/dev/null || { echo "skip todos $r: no todo-issues workflow on the default branch yet"; continue; } ;;
       ruleset)
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
