@@ -1,0 +1,2 @@
+# This repo's labels beyond standard/labels.yaml (see docs/standard.md, Labels).
+- {name: drift, color: b60205, description: "A repo deviates from the GitHub standard"}
