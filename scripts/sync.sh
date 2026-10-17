@@ -131,7 +131,11 @@ if [ "$mode" = apply ]; then
         [ "$(gh api "repos/$OWNER/$r" -q .private)" = true ] && { echo "skip ruleset $r (private, free plan)"; continue; }
         grep -qx "$r" "$DIR/standard/ruleset-exceptions.txt" && { echo "skip ruleset $r (exception)"; continue; }
         id=$(gh api "repos/$OWNER/$r/rulesets" -q '.[]|select(.name=="main")|.id')
-        if [ -n "$id" ]; then gh api -X PUT "repos/$OWNER/$r/rulesets/$id" --input "$DIR/standard/ruleset-main.json" >/dev/null
+        # keep the repo's extra required checks: the standard's are a minimum
+        if [ -n "$id" ]; then
+          jq --argjson cur "$(gh api "repos/$OWNER/$r/rulesets/$id" -q '[.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[]]')" \
+            '(.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks) |= (. + $cur | unique_by(.context))' \
+            "$DIR/standard/ruleset-main.json" | gh api -X PUT "repos/$OWNER/$r/rulesets/$id" --input - >/dev/null
         else gh api "repos/$OWNER/$r/rulesets" --method POST --input "$DIR/standard/ruleset-main.json" >/dev/null; fi ;;
       *) echo "unknown: $what" >&2; exit 2 ;;
     esac
@@ -253,7 +257,8 @@ for r in "${repos[@]}"; do
       else
         want=$(jq -r '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context' "$DIR/standard/ruleset-main.json" | sort)
         got=$(gh api "repos/$OWNER/$r/rulesets/$id" -q '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context' | sort)
-        chk ruleset_main standard "$(ok test "$want" = "$got")" "ruleset main: required checks $(paste -sd, - <<<"$got") (want $(paste -sd, - <<<"$want"))"
+        miss=$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$got") | paste -sd, -) # extra repo checks are allowed
+        chk ruleset_main standard "$(ok test -z "$miss")" "ruleset main: missing required checks $miss"
       fi
     fi
     d=$(jq -r '.security_and_analysis // {} | [("secret_scanning","secret_scanning_push_protection") as $k | select(.[$k].status != "enabled") | "\($k): \(.[$k].status // "n/a") (want enabled)"] | join("; ")' <<<"$s")
