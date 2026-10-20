@@ -280,13 +280,19 @@ for r in "${repos[@]}"; do
   if [ "$priv" = false ]; then chk license standard "$lic" "no LICENSE"; else chk license extra "$lic"; fi
 
   # typed
-  tests=$(ok has '(.*/)?(tests?|__tests__)/.*|(.*/)?test_[^/]*\.py|.*_test\.py|.*\.(test|spec)\.[cm]?[jt]sx?')
-  case $type in python|typescript) chk tests typed "$tests" "no tests found" ;; *) chk tests extra "$tests" ;; esac
+  tests=$(ok has '(.*/)?(tests?|__tests__)/.*|(.*/)?test_[^/]*\.py|.*_test\.(py|go)|.*\.(test|spec)\.[cm]?[jt]sx?')
+  case $type in python|typescript|go) chk tests typed "$tests" "no tests found" ;; *) chk tests extra "$tests" ;; esac
   if [ "$type" = python ]; then
     d=""
     has uv\\.lock || d+="uv.lock "
     for t in ruff mypy pytest; do grep -q "$t" <<<"$py" || has "\.?$t\.(toml|ini)" || d+="$t "; done
     chk python_toolchain typed "$(ok test -z "$d")" "missing: ${d% }"
+  fi
+  if [ "$type" = go ]; then
+    d=""
+    has go\\.mod || d+="go.mod "
+    for t in 'go vet' golangci-lint 'go test -race' govulncheck; do grep -q -- "$t" <<<"$ci$mk" || d+="${t// /_} "; done
+    chk go_toolchain typed "$(ok test -z "$d")" "missing in ci.yml or Makefile: ${d% }"
   fi
   if has '(.*/)?Dockerfile[^/]*'; then
     chk hadolint typed "$(ok grep -q hadolint <<<"$ci$mk")" "Dockerfile without hadolint in ci.yml or Makefile"
