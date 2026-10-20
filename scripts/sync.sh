@@ -291,7 +291,10 @@ for r in "${repos[@]}"; do
   if [ "$type" = go ]; then
     d=""
     has go\\.mod || d+="go.mod "
-    for t in 'go vet' golangci-lint 'go test -race' govulncheck; do grep -q -- "$t" <<<"$ci$mk" || d+="${t// /_} "; done
+    # name=ERE; -race in any flag position or via GOFLAGS; `golangci-lint run`, not the action that installs it
+    for t in 'go_vet=go vet' 'golangci_lint=golangci-lint run' 'go_test_race=test [^|;&]*-race|GOFLAGS=[^ ]*-race' 'govulncheck=govulncheck'; do
+      grep -qE -- "${t#*=}" <<<"$ci$mk" || d+="${t%%=*} "
+    done
     chk go_toolchain typed "$(ok test -z "$d")" "missing in ci.yml or Makefile: ${d% }"
   fi
   if has '(.*/)?Dockerfile[^/]*'; then
