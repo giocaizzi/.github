@@ -18,8 +18,15 @@ on_exit() {
   rm -f "$pin_cache" "$broken" "$broken.last"
   if [ "$rc" = 1 ] && [ -z "${finished:-}" ]; then echo "run broken (not drift): a command failed (see above)" >&2; exit 2; fi
 }
+finished= # never read from the environment: an inherited value must not turn a broken run into drift
 trap on_exit EXIT
 finish() { finished=1; exit "$1"; }
+# a repo path or ref as a URL path: each segment percent-encoded, so `?`, `#`, `%` or `&` in a file name cannot
+# make the API return another file
+uri() { jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")'; }
+# lines `<id>\t<detail>` on stdin as `<id>\t<label>: <detail>`; the label goes through ENVIRON, never into a sed or
+# awk program, so `&`, `\` or `|` in a file name are just characters
+label_lines() { L=$1 awk 'BEGIN {FS = OFS = "\t"; l = ENVIRON["L"]} NF {d = $2; for (i = 3; i <= NF; i++) d = d " " $i; print $1, l ": " d}'; }
 # A failure that is not drift (a GitHub API error other than 404, a failed fetch, a crash of the checker) is recorded in $broken;
 # broken_exit stops the run with exit 2 (the audit itself broke), so it never reaches the drift issue.
 broken_exit() {
@@ -131,6 +138,7 @@ if [ "$mode" = onboard ]; then
   ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
   if [ "${ok:-0}" -gt 0 ]; then "$0" apply ruleset "$r"
   else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
+  rm -f "$pin_cache" "$broken" # exec skips the EXIT trap
   exec "$0" audit "$r"
 fi
 case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|todos|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
@@ -273,13 +281,13 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
 # Helpers read the current repo's globals ($r, $paths, $entries, $m, ...).
 # shellcheck disable=SC2317,SC2329 # job_ok etc. are invoked through ok()
 {
-  chk() { rec+="$1	$2	$3	${4:-}"$'\n'; }        # id kind pass|present detail
+  chk() { local d=${4:-}; d=${d//[$'\t\n\r']/ }; rec+="$1	$2	$3	$d"$'\n'; } # id kind pass|present detail (one line)
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
-  raw() { if has "${1//./\\.}"; then fetch "$1"; fi; } # a file the tree lists; a failed fetch is a broken run
+  raw() { if grep -qxF -- "$1" <<<"$paths"; then fetch "$1"; fi; } # a file the tree lists (exact path); a failed fetch is a broken run
   # a file the hygiene checks read: a failed fetch is a broken run (recorded), never empty input read as drift
   fetch() {
-    gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
+    gh api "repos/$OWNER/$r/contents/$(uri "$1")?ref=$(uri "$base")" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
       || echo "gh api contents/$1 ($r): $(head -1 "$broken.last")" >> "$broken"
   }
   excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
@@ -328,9 +336,12 @@ for r in "${repos[@]}"; do
       squash_merge_commit_message: $g.squashMergeCommitMessage}' <<<"$s")
   priv=$(jq -r .private <<<"$s")
   base=$(jq -r .default_branch <<<"$s")
-  tree=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1")
+  tree=$(gh api "repos/$OWNER/$r/git/trees/$(uri "$base")?recursive=1")
   # a truncated tree would drop files from the checks: a broken run, not a pass
   [ "$(jq -r .truncated <<<"$tree")" = false ] || { echo "git tree of $r truncated by the API" >> "$broken"; broken_exit; }
+  # the tree is read as lines: a path with a control character (a newline splits it) cannot be checked, so the run breaks
+  [ "$(jq '[.tree[].path | select(explode | any(. < 32 or . == 127))] | length' <<<"$tree")" = 0 ] \
+    || { echo "a path in the git tree of $r has a control character" >> "$broken"; broken_exit; }
   entries=$(jq -r '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"' <<<"$tree")
   paths=$(cut -d' ' -f3- <<<"$entries")
   m=$(jq -c -f "$DIR/scripts/meta.jq" <<<"$s")
@@ -351,7 +362,7 @@ for r in "${repos[@]}"; do
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     kind=""; [[ $f =~ (^|/)action\.ya?ml$ ]] && kind=--action # the file kind comes from its path, never its content
-    hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
+    hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | label_lines "${f#.github/workflows/}")$'\n'
   done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$|^(.*/)?action\.ya?ml$' <<<"$paths")
   broken_exit
   for w in pr-title label-guard todo-issues; do
@@ -469,8 +480,11 @@ for r in "${repos[@]}"; do
         while IFS= read -r j; do [ -n "$j" ] && d+="$f job $j has no environment; "; done < <(unenv_jobs <<<"$c")
         pypi_wf_ok "$c" && pypi_ok=true
       done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+      # a failed call is a broken run, not an empty secret list that passes `environments`
+      secs=$(gh api "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' </dev/null 2>"$broken.last") \
+        || { echo "gh api actions/secrets ($r): $(head -1 "$broken.last")" >> "$broken"; broken_exit; }
       while IFS= read -r sec; do d+="repository secret $sec (use an environment secret); "; done \
-        < <(gh api "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' | grep -E 'PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER' || true)
+        < <(grep -E 'PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER' <<<"$secs" || true)
       chk environments typed "$(ok test -z "$d")" "${d%; }"
       if [ "$pypi" = true ]; then
         has release-please-config\\.json || pypi_ok=false

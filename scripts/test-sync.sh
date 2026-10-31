@@ -37,5 +37,21 @@ audit() { PATH="$PWD/tests/fake-gh:$PATH" GH_TOKEN=x FAKE_GH=$1 OWNER=o scripts/
 rc=0; err=$(audit fail) || rc=$?; t test "$rc" = 2; t grep -q 'HTTP 502' <<<"$err"
 rc=0; err=$(audit truncated) || rc=$?; t test "$rc" = 2; t grep -q 'tree of r truncated' <<<"$err"
 
+# an inherited `finished` must not turn a broken run into drift
+rc=0; finished=1 audit fail >/dev/null || rc=$?; t test "$rc" = 2
+
+# a file name with `&`, `\`, `|`, `?` or `#` is checked like any other (it once emptied every finding through sed,
+# or fetched another file): the bad workflow fails its checks whatever its name
+pinned_fails() { jq -e '.[0].checks.wf_pinned.pass == false' <<<"$2" >/dev/null; } # $1 names the case in a FAIL line
+files() { PATH="$PWD/tests/fake-gh:$PATH" GH_TOKEN=x FAKE_GH=files FAKE_PATH=$1 OWNER=o scripts/sync.sh audit --json r 2>/dev/null; }
+for p in .github/workflows/bad.yml '.github/workflows/&.yml' '.github/workflows/\n.yml' '.github/workflows/a|b.yml' \
+  '.github/workflows/ok?x.yml' '.github/workflows/c#d.yml' '&/action.yml'; do
+  rc=0; json=$(files "$p") || rc=$?
+  t test "$rc" = 1
+  t pinned_fails "$p" "$json" # both bad files hold evil/action@main
+done
+# a path with a control character (a newline would split it into two lines) is a broken run
+rc=0; files $'.github/workflows/a\nb.yml' >/dev/null || rc=$?; t test "$rc" = 2
+
 [ "$fail" = 0 ] && echo "sync.sh helpers and exit codes: ok"
 exit "$fail"
