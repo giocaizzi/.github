@@ -7,7 +7,7 @@ Prereqs: `gh` authenticated with `repo` + `administration` scope, `jq`, `shellch
 make audit                      # all in-scope repos (VISIBILITY=public|private to narrow)
 scripts/sync.sh audit greenhouse # one repo
 ```
-Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope or the audit itself broke (a GitHub API error other than a 404 tag lookup, a failed fetch, a truncated repo tree, a missing checker lock, a crash of `scripts/workflow.py` or `uv`, or any other failed command; the cause is printed). The weekly workflow fails on 2 and files no drift issue. Output lists each failing check as `id: detail`.
+Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope or the audit itself broke (a GitHub API error other than a 404 tag lookup, a failed fetch, a truncated repo tree, a tree path with a control character, a missing checker lock, a crash of `scripts/workflow.py` or `uv`, or any other failed command; the settings probes that answer 404 for "disabled" read a failure as disabled, which is drift; the cause is printed). The weekly workflow fails on 2 and files no drift issue. Output lists each failing check as `id: detail`.
 
 JSON for the dashboard:
 ```bash
