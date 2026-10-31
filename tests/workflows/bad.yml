@@ -1,0 +1,23 @@
+# fails every CI hygiene rule (scripts/workflow.awk); expected output: bad.out
+name: Bad
+on: [push, pull_request]
+permissions: write-all
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: "owner/action@main" # floating branch
+      - uses: ./local-action
+      - uses: docker://alpine:3
+      - uses: owner/short@3d3c42e
+  reuse:
+    uses: owner/repo/.github/workflows/ci.yml@3d3c42e5aac5ba805825da76410c181273ba90b1
+  timed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: true

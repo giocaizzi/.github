@@ -1,0 +1,4 @@
+wf_permissions	permissions: write-all
+wf_timeout	jobs without timeout-minutes: build
+wf_concurrency	cancel-in-progress: true on a push or merge_group run
+wf_pinned	not pinned by SHA: actions/checkout@v7, owner/action@main, owner/short@3d3c42e

@@ -38,6 +38,8 @@ repos=("$@")
 [ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
 
+# a workflow with its action refs blanked (`uses: x@<sha> # vN` -> `uses: x@`), to compare across Dependabot bumps
+norm_uses() { sed -E 's/^([[:space:]]*(- )?uses:[[:space:]]*[^@[:space:]]+)@.*$/\1@/'; }
 label_names() { { grep -oE 'name: ("[^"]+"|[^,}]+)' || true; } | sed -E 's/name: //; s/"//g'; }
 want_labels=$(label_names < "$DIR/standard/labels.yaml")
 # create or update the labels.yaml lines on stdin in repo $r; `extra` skips a name the standard defines
@@ -83,6 +85,8 @@ if [ "$mode" = apply ]; then
           path=.github/workflows/$(basename "$f")
           cur=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -q .sha 2>/dev/null || true)
           [ "$cur" = "$(git hash-object "$f")" ] && continue
+          # keep a repo's own newer action pins: skip a file that differs only in its `uses:` refs
+          [ -n "$cur" ] && [ "$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -H 'Accept: application/vnd.github.raw' | norm_uses)" = "$(norm_uses < "$f")" ] && continue
           gh api -X PUT "repos/$OWNER/$r/contents/$path" -f branch="$branch" -f message="ci: add standard $(basename "$f")" \
             -f content="$(base64 < "$f" | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
           changed=1
@@ -220,7 +224,21 @@ for r in "${repos[@]}"; do
   chk gitleaks standard "$(ok grep -q gitleaks <<<"$ci")" "ci.yml does not run gitleaks"
   for w in pr-title label-guard todo-issues; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
-    chk "${w/-/_}" standard "$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")" "workflow drift: $w.yml"
+    # equal, or equal but for the action refs Dependabot bumps (wf_pinned checks those)
+    same=$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")
+    [ "$same" = false ] && [ -n "$got" ] && same=$(ok test "$(raw ".github/workflows/$w.yml" | norm_uses)" = "$(norm_uses < "$DIR/standard/workflows/$w.yml")")
+    chk "${w/-/_}" standard "$same" "workflow drift: $w.yml"
+  done
+  # todo-issues pushes run on main or master only (its `branches:`)
+  chk todo_issues_branch standard "$(ok grep -qxE 'main|master' <<<"$base")" "default branch $base: todo-issues triggers on main or master only"
+  # CI hygiene of every workflow (scripts/workflow.awk): one check per rule, each detail prefixed by its file
+  hyg="" tab=$'\t'
+  while IFS= read -r f; do
+    [ -n "$f" ] && hyg+=$(raw "$f" | awk -f "$DIR/scripts/workflow.awk" | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
+  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+  for c in wf_permissions wf_timeout wf_concurrency wf_pinned; do
+    d=$(awk -F'\t' -v c="$c" '$1==c{print $2}' <<<"$hyg" | paste -sd';' - | sed 's/;/; /g')
+    chk "$c" standard "$(ok test -z "$d")" "$d"
   done
   chk dependabot standard "$(ok has '\.github/dependabot\.ya?ml')" "no .github/dependabot.yml"
   # every updates entry needs a non-empty `groups:` block; prints "<entries> <ungrouped>"

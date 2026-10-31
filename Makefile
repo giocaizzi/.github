@@ -8,8 +8,10 @@ lint: ## shellcheck scripts, validate JSON
 	shellcheck scripts/*.sh
 	jq empty standard/*.json
 
-test: ## Smoke-test: the audit script parses, the topic parser reads type and flags
+test: ## Smoke-test: the audit script parses, the topic parser reads type and flags, the workflow checker flags what it should
 	bash -n scripts/sync.sh
+	for f in standard/workflows/*.yml .github/workflows/*.yml; do out=$$(awk -f scripts/workflow.awk "$$f"); [ -z "$$out" ] || { echo "$$f: $$out"; exit 1; }; done
+	for f in tests/workflows/*.yml; do awk -f scripts/workflow.awk "$$f" | diff -u "$${f%.yml}.out" - || exit 1; done
 	echo '{"topics":["gis","std-python","std-released","std-exception-agent-ignore"]}' | jq -ef scripts/meta.jq \
 	  | jq -e '.type == "python" and .released and (.pypi | not) and .exceptions == ["agent_ignore"]' >/dev/null
 	echo '{"topics":["std-go"]}' | jq -ef scripts/meta.jq | jq -e '.type == "go"' >/dev/null

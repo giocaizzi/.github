@@ -1,0 +1,3 @@
+wf_permissions	no top-level permissions
+wf_timeout	jobs without timeout-minutes: a
+wf_concurrency	pull_request trigger without concurrency
