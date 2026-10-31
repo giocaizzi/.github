@@ -1,0 +1,13 @@
+# (c) a multi-line quoted name whose continuation opens a fake block scalar that hides a step; expected: quoted-continuation.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "x
+      z: |
+          y"
+        uses: evil/a@main

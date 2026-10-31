@@ -1,0 +1,1 @@
+wf_pinned	`.` or `..` path segment in a remote ref: actions/checkout/../../../evil/x@3d3c42e5aac5ba805825da76410c181273ba90b1; `.` or `..` path segment in a remote ref: actions/checkout/./sub@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -1,0 +1,15 @@
+# cancel-in-progress: True on a push workflow; expected: cancel-True.out
+on:
+  push:
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: True
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo

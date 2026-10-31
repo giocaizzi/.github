@@ -1,0 +1,9 @@
+# a job name with a newline and a tab: the finding stays on one line, escaped; expected: control-char-name.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  "a\nwf_pinned\tb":
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo

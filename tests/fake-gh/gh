@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# A stand-in for `gh` in scripts/test-sync.sh: answers the `gh api` calls an audit of repo `r` makes.
+#   FAKE_GH=fail       the repo lookup fails (HTTP 502)
+#   FAKE_GH=truncated  the repo tree is truncated
+#   FAKE_GH=files      the tree holds one blob at FAKE_PATH (bad-workflow.yml or bad-action.yml here); its contents are
+#                      served only at the percent-encoded path, as the API expects
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+case ${1:-} in
+  label) exit 0 ;; # gh label list: no labels
+  api) ;;
+  *) echo "fake gh: unsupported $1" >&2; exit 1 ;;
+esac
+path=$2 q=""
+while [ $# -gt 0 ]; do [ "$1" = -q ] && q=$2; shift; done
+case $path in
+  graphql) json='{"data":{"repository":{"squashMergeAllowed":true}}}' ;;
+  repos/*/.github/git/trees/*) json='{"truncated":false,"tree":[]}' ;;
+  repos/*/r)
+    [ "${FAKE_GH:-}" = fail ] && { echo "gh: Server Error (HTTP 502)" >&2; exit 1; }
+    json='{"private":true,"default_branch":"main","topics":["std-docs"],"has_pages":false}' ;;
+  repos/*/r/git/trees/*)
+    if [ "${FAKE_GH:-}" = files ]; then
+      json=$(jq -cn --arg p "$FAKE_PATH" '{truncated: false, tree: [{type: "blob", mode: "100644", sha: "0", path: $p}]}')
+    else json='{"truncated":true,"tree":[]}'; fi ;;
+  repos/*/r/contents/*)
+    want=$(jq -rn --arg p "${FAKE_PATH:-}" '$p | split("/") | map(@uri) | join("/")')
+    [ "$path" = "repos/o/r/contents/$want?ref=main" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    case $FAKE_PATH in */action.yml|action.yml) cat "$here/bad-action.yml" ;; *) cat "$here/bad-workflow.yml" ;; esac
+    exit 0 ;;
+  *) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+esac
+if [ -n "$q" ]; then jq -r "$q" <<<"$json"; else printf '%s\n' "$json"; fi

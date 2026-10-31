@@ -1,0 +1,70 @@
+# timeout-minutes forms: only a plain positive decimal or one non-constant expression passes; expected: timeout-forms.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  underscore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1_0
+    steps:
+      - run: echo
+  binary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 0b101
+    steps:
+      - run: echo
+  hexunder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 0x_1
+    steps:
+      - run: echo
+  octal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 010
+    steps:
+      - run: echo
+  zero:
+    runs-on: ubuntu-latest
+    timeout-minutes: 0
+    steps:
+      - run: echo
+  constexpr:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 0 }}
+    steps:
+      - run: echo
+  twoexpr:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 1 }} ${{ 2 }}
+    steps:
+      - run: echo
+  strexpr:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ '5' }}
+    steps:
+      - run: echo
+  plain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo
+  input:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.minutes }}
+    steps:
+      - run: echo
+  hexconst:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 0x0 }}
+    steps:
+      - run: echo
+  expconst:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 1e3 }}
+    steps:
+      - run: echo
+  ctxinstring:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 'inputs.minutes' }}
+    steps:
+      - run: echo

@@ -1,12 +1,129 @@
 #!/usr/bin/env bash
 # Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|todos|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
-# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope. `--json` prints a JSON array on stdout and the text report on stderr.
+# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope or a broken run (any failed API call or command, but a 404 tag lookup; a truncated tree; a checker crash). `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
 set -euo pipefail
 OWNER=${OWNER:-giocaizzi}
-DIR=$(cd "$(dirname "$0")/.." && pwd)
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Workflow hygiene (scripts/workflow.py checks, scripts/workflow.awk text modes; rules in docs/standard.md, CI hygiene).
+WF=$DIR/scripts/workflow.awk
+pin_cache=$(mktemp) broken=$(mktemp) # `<owner/repo> <tag> <commit>` per tag looked up this run; what broke the run
+# Exit 1 means drift only when the audit says so (`finish`): any other exit 1 (a failed command under `set -e`, e.g.
+# a GitHub API call) is a broken run and becomes exit 2, which audit.yml never reads as drift.
+on_exit() {
+  local rc=$?
+  rm -f "$pin_cache" "$broken" "$broken.last"
+  if [ "$rc" = 1 ] && [ -z "${finished:-}" ]; then echo "run broken (not drift): a command failed (see above)" >&2; exit 2; fi
+}
+finished= # never read from the environment: an inherited value must not turn a broken run into drift
+trap on_exit EXIT
+finish() { finished=1; exit "$1"; }
+# a repo path or ref as a URL path: each segment percent-encoded, so `?`, `#`, `%` or `&` in a file name cannot
+# make the API return another file
+uri() { jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")'; }
+# lines `<id>\t<detail>` on stdin as `<id>\t<label>: <detail>`; the label goes through ENVIRON, never into a sed or
+# awk program, so `&`, `\` or `|` in a file name are just characters
+label_lines() { L=$1 awk 'BEGIN {FS = OFS = "\t"; l = ENVIRON["L"]} NF {d = $2; for (i = 3; i <= NF; i++) d = d " " $i; print $1, l ": " d}'; }
+# A failure that is not drift (a GitHub API error other than 404, a failed fetch, a crash of the checker) is recorded in $broken;
+# broken_exit stops the run with exit 2 (the audit itself broke), so it never reaches the drift issue.
+broken_exit() {
+  [ -s "$broken" ] || return 0
+  { echo "audit broken (not drift):"; sed 's/^/  /' "$broken"; } >&2
+  exit 2
+}
+# `<type> <sha>` of the git object at API path $1; `- -` on HTTP 404; `! !` on any other failure (recorded)
+git_obj() {
+  local out
+  if out=$(gh api "$1" -q '"\(.object.type) \(.object.sha)"' </dev/null 2>"$broken.last"); then echo "$out"
+  elif grep -q 'HTTP 404' "$broken.last"; then echo "- -"
+  else echo "gh api $1: $(head -1 "$broken.last")" >> "$broken"; echo "! !"; fi
+}
+# the commit tag $2 of $1 points to (annotated tags dereferenced): `-` when the tag does not exist, `!` when the
+# lookup failed (recorded in $broken)
+tag_commit() {
+  local hit type sha
+  hit=$(awk -v r="$1" -v t="$2" '$1 == r && $2 == t {print $3; exit}' "$pin_cache")
+  [ -n "$hit" ] && { echo "$hit"; return; }
+  read -r type sha < <(git_obj "repos/$1/git/ref/tags/$2")
+  for _ in 1 2 3; do # tag objects can point to tags
+    [ "$type" = tag ] || break
+    read -r type sha < <(git_obj "repos/$1/git/tags/$sha")
+  done
+  [ "$type" = ! ] && { echo !; return; }
+  [ "$type" = commit ] || sha=-
+  echo "$1 $2 $sha" >> "$pin_cache"; echo "$sha"
+}
+# The checker: scripts/workflow.py on the pinned YAML parser (its lock file pins the hashes). A non-zero exit is a
+# crash, recorded in $broken; it never passes a file. Text modes (norm, subst) are scripts/workflow.awk.
+# `--locked` does not fail when the lock file is missing (it runs unhashed), so its absence is a crash here.
+wf_check() {
+  [ -f "$DIR/scripts/workflow.py.lock" ] || { echo "scripts/workflow.py.lock missing" >&2; return 3; }
+  uv run --quiet --script --locked "$DIR/scripts/workflow.py" "$@"
+}
+# the checker's output for the workflow (or, with --action, the action.yml) on stdin; after a crash, a wf_parsed
+# finding (so nothing passes) and a record in $broken (so the run exits 2)
+wf_out() {
+  local out
+  out=$(wf_check "$@") || { echo "scripts/workflow.py failed (exit $?)" >> "$broken"; printf 'wf_parsed\tscripts/workflow.py failed\n'; return 0; }
+  [ -z "$out" ] || printf '%s\n' "$out"
+}
+# whether `./` ref $2 points at a regular file in the repo tree $1 (`<mode> <sha> <path>` lines): an action.yml or
+# action.yaml in that directory (the repo root for `./`), or the file itself (a local reusable workflow). A symlink
+# never counts: its target is not what the audit scanned. The path goes through ENVIRON, which awk does not unescape.
+local_ok() {
+  local p=${2#./}
+  p=${p%/}
+  P=$p awk 'BEGIN {p = ENVIRON["P"]; d = (p == "" ? "" : p "/")}
+    {m = $1; path = $0; sub(/^[^ ]+ [^ ]+ /, "", path)
+     if ((m == "100644" || m == "100755") && ((p != "" && path == p) || path == d "action.yml" || path == d "action.yaml")) f = 1}
+    END {exit !f}' <<<"$1"
+}
+# hygiene findings of the workflow on stdin (with $2 = --action: an action.yml), `<id>\t<detail>`: the checker's,
+# each pin checked upstream, and each `./` ref found in the repo tree $1 (`<mode> <sha> <path>` lines)
+wf_findings() {
+  local out kind a b c got
+  out=$(wf_out ${2:+"$2"})
+  grep -E '^wf_' <<<"$out" || true
+  while IFS=$'\t' read -r kind a b c; do
+    case $kind in
+      pin)
+        got=$(tag_commit "$a" "$c")
+        case $got in
+          "$b"|!) ;; # verified, or recorded in $broken (the run exits 2)
+          -) printf 'wf_pinned\t%s@%s: tag %s not found upstream\n' "$a" "$b" "$c" ;;
+          *) printf 'wf_pinned\t%s@%s is not %s upstream (tag is %s)\n' "$a" "$b" "$c" "$got" ;;
+        esac ;;
+      local)
+        local_ok "${1:-}" "$a" || printf 'wf_pinned\tlocal ref %s: no action.yml or workflow file at that path in the repo\n' "$a" ;;
+    esac
+  done <<<"$out"
+}
+# true when the workflow on stdin has no finding that touches its refs: every pin verified, nothing unparsed
+pins_ok() { local f; f=$(wf_findings ""); ! grep -qE '^(wf_parsed|wf_pinned)' <<<"$f"; } # no pipe: grep -q + pipefail would fail open
+# the pins of the workflow on stdin that match their version tag upstream, `<owner/repo>\t<sha>\t<version>`
+verified_pins() {
+  local out kind repo sha tag
+  out=$(wf_out)
+  while IFS=$'\t' read -r kind repo sha tag; do
+    [ "$kind" = pin ] && [ "$(tag_commit "$repo" "$tag")" = "$sha" ] && printf '%s\t%s\t%s\n' "$repo" "$sha" "$tag"
+  done <<<"$out" || true # a loop ending on a false test is not a failure; no pipe, so nothing else is hidden
+}
+# `owner/repo=<sha> # <version>;...` for the verified pins in workflow $1 (content) newer than those in file $2
+newer_pins() {
+  local v std_pins repo sha tag std
+  v=$(verified_pins <<<"$1"); std_pins=$(wf_out < "$2")
+  while IFS=$'\t' read -r repo sha tag; do
+    [ -n "$repo" ] || continue
+    std=$(awk -F'\t' -v r="$repo" '$1 == "pin" && $2 == r && !n++ {print $4}' <<<"$std_pins")
+    [ -n "$std" ] && [ "${tag#v}" != "${std#v}" ] && [ "$(printf '%s\n' "${tag#v}" "${std#v}" | sort -V | tail -1)" = "${tag#v}" ] \
+      && printf '%s=%s # %s;' "$repo" "$sha" "$tag"
+  done <<<"$v" || true # a loop ending on a false test is not a failure
+}
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by scripts/test-sync.sh for the helpers above
+
 
 mode=${1:-}
 if [ "$mode" = onboard ]; then
@@ -21,6 +138,7 @@ if [ "$mode" = onboard ]; then
   ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
   if [ "${ok:-0}" -gt 0 ]; then "$0" apply ruleset "$r"
   else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
+  rm -f "$pin_cache" "$broken" # exec skips the EXIT trap
   exec "$0" audit "$r"
 fi
 case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|todos|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
@@ -83,8 +201,18 @@ if [ "$mode" = apply ]; then
           path=.github/workflows/$(basename "$f")
           cur=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -q .sha 2>/dev/null || true)
           [ "$cur" = "$(git hash-object "$f")" ] && continue
+          new=$(cat "$f")
+          if [ -n "$cur" ]; then
+            have=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -H 'Accept: application/vnd.github.raw')
+            # differs only in its refs, each a SHA verified against its version tag: keep the repo's copy
+            if pins_ok <<<"$have"; then ok_pins=true; else ok_pins=false; fi; broken_exit
+            [ "$ok_pins" = true ] && [ "$(awk -v mode=norm -f "$WF" <<<"$have")" = "$(awk -v mode=norm -f "$WF" "$f")" ] && continue
+            # never downgrade: carry over the repo's verified pins newer than the standard's
+            reps=$(newer_pins "$have" "$f"); broken_exit
+            new=$(awk -v mode=subst -v reps="$reps" -f "$WF" "$f")
+          fi
           gh api -X PUT "repos/$OWNER/$r/contents/$path" -f branch="$branch" -f message="ci: add standard $(basename "$f")" \
-            -f content="$(base64 < "$f" | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
+            -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
           changed=1
         done
         if [ $changed = 1 ]; then
@@ -153,10 +281,15 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
 # Helpers read the current repo's globals ($r, $paths, $entries, $m, ...).
 # shellcheck disable=SC2317,SC2329 # job_ok etc. are invoked through ok()
 {
-  chk() { rec+="$1	$2	$3	${4:-}"$'\n'; }        # id kind pass|present detail
+  chk() { local d=${4:-}; d=${d//[$'\t\n\r']/ }; rec+="$1	$2	$3	$d"$'\n'; } # id kind pass|present detail (one line)
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
-  raw() { if has "${1//./\\.}"; then gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; fi; }
+  raw() { if grep -qxF -- "$1" <<<"$paths"; then fetch "$1"; fi; } # a file the tree lists (exact path); a failed fetch is a broken run
+  # a file the hygiene checks read: a failed fetch is a broken run (recorded), never empty input read as drift
+  fetch() {
+    gh api "repos/$OWNER/$r/contents/$(uri "$1")?ref=$(uri "$base")" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
+      || echo "gh api contents/$1 ($r): $(head -1 "$broken.last")" >> "$broken"
+  }
   excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
   agent_ignore_missing() { grep -vxF -f <(raw .gitignore) <(grep -v '^#' "$DIR/standard/gitignore-agents") || true; }
@@ -203,7 +336,13 @@ for r in "${repos[@]}"; do
       squash_merge_commit_message: $g.squashMergeCommitMessage}' <<<"$s")
   priv=$(jq -r .private <<<"$s")
   base=$(jq -r .default_branch <<<"$s")
-  entries=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1" -q '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"')
+  tree=$(gh api "repos/$OWNER/$r/git/trees/$(uri "$base")?recursive=1")
+  # a truncated tree would drop files from the checks: a broken run, not a pass
+  [ "$(jq -r .truncated <<<"$tree")" = false ] || { echo "git tree of $r truncated by the API" >> "$broken"; broken_exit; }
+  # the tree is read as lines: a path with a control character (a newline splits it) cannot be checked, so the run breaks
+  [ "$(jq '[.tree[].path | select(explode | any(. < 32 or . == 127))] | length' <<<"$tree")" = 0 ] \
+    || { echo "a path in the git tree of $r has a control character" >> "$broken"; broken_exit; }
+  entries=$(jq -r '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"' <<<"$tree")
   paths=$(cut -d' ' -f3- <<<"$entries")
   m=$(jq -c -f "$DIR/scripts/meta.jq" <<<"$s")
   type=$(jq -r .type <<<"$m")
@@ -218,9 +357,28 @@ for r in "${repos[@]}"; do
   else chk ci_check_job standard "$(ok job_ok)" "check job lacks needs + if: always()"; fi
   chk make_check standard "$(ok grep -qE '^check:' <<<"$mk")" "Makefile has no check target"
   chk gitleaks standard "$(ok grep -q gitleaks <<<"$ci")" "ci.yml does not run gitleaks"
+  # CI hygiene of every workflow and every action.yml (local actions): one check per rule, details prefixed by file
+  hyg="" tab=$'\t'
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    kind=""; [[ $f =~ (^|/)action\.ya?ml$ ]] && kind=--action # the file kind comes from its path, never its content
+    hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | label_lines "${f#.github/workflows/}")$'\n'
+  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$|^(.*/)?action\.ya?ml$' <<<"$paths")
+  broken_exit
   for w in pr-title label-guard todo-issues; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
-    chk "${w/-/_}" standard "$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")" "workflow drift: $w.yml"
+    # byte-equal, or equal but for refs that are each a SHA verified against its version tag (a Dependabot bump)
+    same=$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")
+    [ "$same" = false ] && [ -n "$got" ] && ! grep -qE "^(wf_parsed|wf_pinned)$tab$w\.yml: " <<<"$hyg" &&
+      same=$(ok test "$(fetch ".github/workflows/$w.yml" | awk -v mode=norm -f "$WF")" = "$(awk -v mode=norm -f "$WF" "$DIR/standard/workflows/$w.yml")")
+    chk "${w/-/_}" standard "$same" "workflow drift: $w.yml"
+  done
+  broken_exit
+  # todo-issues pushes run on main or master only (its `branches:`)
+  chk todo_issues_branch standard "$(ok grep -qxE 'main|master' <<<"$base")" "default branch $base: todo-issues triggers on main or master only"
+  for c in wf_parsed wf_permissions wf_timeout wf_concurrency wf_pinned; do
+    d=$(awk -F'\t' -v c="$c" '$1==c{print $2}' <<<"$hyg" | paste -sd';' - | sed 's/; */; /g')
+    chk "$c" standard "$(ok test -z "$d")" "$d"
   done
   chk dependabot standard "$(ok has '\.github/dependabot\.ya?ml')" "no .github/dependabot.yml"
   # every updates entry needs a non-empty `groups:` block; prints "<entries> <ungrouped>"
@@ -322,8 +480,11 @@ for r in "${repos[@]}"; do
         while IFS= read -r j; do [ -n "$j" ] && d+="$f job $j has no environment; "; done < <(unenv_jobs <<<"$c")
         pypi_wf_ok "$c" && pypi_ok=true
       done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+      # a failed call is a broken run, not an empty secret list that passes `environments`
+      secs=$(gh api "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' </dev/null 2>"$broken.last") \
+        || { echo "gh api actions/secrets ($r): $(head -1 "$broken.last")" >> "$broken"; broken_exit; }
       while IFS= read -r sec; do d+="repository secret $sec (use an environment secret); "; done \
-        < <(gh api "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' | grep -E 'PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER' || true)
+        < <(grep -E 'PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER' <<<"$secs" || true)
       chk environments typed "$(ok test -z "$d")" "${d%; }"
       if [ "$pypi" = true ]; then
         has release-please-config\\.json || pypi_ok=false
@@ -338,6 +499,7 @@ for r in "${repos[@]}"; do
   chk changelog extra "$(ok has '(.*/)?CHANGELOG\.md')"
   chk docs_site extra "$(jq -r '.has_pages or ((.homepage // "") != "")' <<<"$s")"
 
+  broken_exit # a failed fetch above is a broken run, never drift
   fails=$(awk -F'\t' '$2!="extra" && $3=="false" {print $1": "$4}' <<<"$rec")
   if [ -z "$fails" ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; while IFS= read -r l; do printf '        %s\n' "$l"; done <<<"$fails"; fi
   results+=$(jq -n --arg repo "$r" --arg type "$type" --argjson released "$released" --argjson private "$priv" --arg ex "$ex" --arg rec "$rec" '
@@ -350,4 +512,4 @@ for r in "${repos[@]}"; do
      score: {standard: score("standard"), typed: score("typed"), extras: "\($e | map(select(.pass)) | length)/\($e | length)"}}')$'\n'
 done
 [ $json = 1 ] && jq -s . <<<"$results" >&3
-exit $drift
+finish $drift

@@ -6,6 +6,11 @@ on:
     types: [opened, edited, synchronize, reopened]
   merge_group:
 
+concurrency:
+  # one group per pull request, superseded runs cancelled; every other run gets its own group, never cancelled
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -13,6 +18,7 @@ jobs:
   validate:
     name: Validate PR title
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check PR title format
         # release-please opens its own release PRs; skip at the STEP level so the

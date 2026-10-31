@@ -1,0 +1,11 @@
+# (b) an explicit key `? uses` with its value on the next line; expected: explicit-key.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - ? uses
+        : evil/a@main

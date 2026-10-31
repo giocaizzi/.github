@@ -1,0 +1,12 @@
+# docker refs pinned by digest pass; a local ref climbing out of the repo does not; expected: docker-digest.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: docker://alpine@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      - uses: ./../outside
+      - uses: actions/checkout?x@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

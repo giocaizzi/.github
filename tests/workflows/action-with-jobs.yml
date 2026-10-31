@@ -1,0 +1,12 @@
+# action metadata that also carries workflow keys (the runner accepts any extra key): it is never read as a workflow,
+# so its runs.steps cannot hide; expected: action-with-jobs.out
+name: x
+on: pull_request
+permissions: {}
+concurrency: x
+jobs:
+  a: {runs-on: x, timeout-minutes: 5, steps: [{run: "true"}]}
+runs:
+  using: composite
+  steps:
+    - uses: evil/x@main

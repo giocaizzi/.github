@@ -12,10 +12,14 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # AUDIT_TOKEN: fine-grained PAT, read-only "Administration", "Contents", "Issues", "Secrets" + "Metadata" on all repos.
       # Public repos only: this repo, its artifact and its issues are public. Private repos are audited locally.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.2" # the workflow checker runs on uv (scripts/workflow.py and its lock)
       - name: Audit public repos
         env:
           GH_TOKEN: ${{ secrets.AUDIT_TOKEN }}
@@ -28,7 +32,7 @@ jobs:
           [ "$rc" = 1 ] && echo "drift=1" >> "$GITHUB_ENV"
           [ "$rc" = 0 ] || [ "$rc" = 1 ]
       # Latest JSON for the dashboard: GET repos/giocaizzi/.github/actions/artifacts?name=audit
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: audit
           path: audit.json

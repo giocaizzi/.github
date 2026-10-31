@@ -1,0 +1,5 @@
+# action metadata of a docker action on a mutable image tag; expected: action-docker.out
+name: tool
+runs:
+  using: docker
+  image: docker://alpine:3

@@ -1,0 +1,2 @@
+wf_timeout	jobs without a positive timeout-minutes: a
+wf_pinned	not pinned by SHA: actions/checkout@v7

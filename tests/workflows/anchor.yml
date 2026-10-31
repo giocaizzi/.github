@@ -1,0 +1,10 @@
+# write-all behind an anchor, reused through an alias on a job; expected: anchor.out
+on: workflow_dispatch
+permissions: &p write-all
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *p
+    steps:
+      - run: echo

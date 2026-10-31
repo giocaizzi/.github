@@ -1,0 +1,9 @@
+# (a) a flow value on a keyed job line holding an unpinned action; expected: flow-steps.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps: [{uses: evil/a@main}]

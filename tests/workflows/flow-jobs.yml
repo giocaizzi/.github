@@ -1,0 +1,5 @@
+# flow-style jobs: fails closed; expected: flow-jobs.out
+on: push
+permissions:
+  contents: read
+jobs: {a: {runs-on: ubuntu-latest, steps: [{uses: actions/checkout@v7}]}}

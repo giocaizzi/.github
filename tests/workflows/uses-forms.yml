@@ -1,0 +1,16 @@
+# other ways to write a `uses` key; each is parsed or fails closed; expected: uses-forms.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      -   uses: org/multispace@main
+      - {uses: org/flow@main}
+      - uses : org/spacecolon@main
+      - "uses": org/quotedkey@main
+      - 'uses': org/singlequoted@main
+      - run: |
+          echo "uses: org/inside-a-script@main is a string, not a key"

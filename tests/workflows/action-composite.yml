@@ -1,0 +1,8 @@
+# action metadata (action.yml) of a composite action: its steps follow the same pin rule; expected: action-composite.out
+name: setup
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: evil/a@main
+    - uses: ./nested

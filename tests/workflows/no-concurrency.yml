@@ -1,0 +1,9 @@
+# a pull_request workflow without concurrency or top-level permissions; expected output: no-concurrency.out
+on:
+  pull_request:
+    types: [opened]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

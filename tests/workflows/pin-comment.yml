@@ -1,0 +1,11 @@
+# a 40-hex ref without its version comment; expected: pin-comment.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: owner/action@1111111111111111111111111111111111111111
+      - uses: owner/other@1111111111111111111111111111111111111111 # latest

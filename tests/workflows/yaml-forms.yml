@@ -1,0 +1,15 @@
+# YAML tags, a tab-indented line and an escaped quoted key; expected: yaml-forms.out
+on: push
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.run_id }}
+  cancel-in-progress: !!bool true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+	- run: echo
+      - "u\x73es": evil/a@main
+      - !!str uses: evil/b@main

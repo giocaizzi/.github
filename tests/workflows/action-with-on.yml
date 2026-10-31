@@ -1,0 +1,7 @@
+# action metadata with a stray `on:` key and no jobs: its runs.steps are still checked; expected: action-with-on.out
+name: x
+on: push
+runs:
+  using: composite
+  steps:
+    - uses: evil/x@main

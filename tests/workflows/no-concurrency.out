@@ -1,0 +1,4 @@
+wf_permissions	no top-level permissions
+wf_timeout	jobs without a positive timeout-minutes: a
+wf_concurrency	pull_request trigger without concurrency
+pin	actions/checkout	3d3c42e5aac5ba805825da76410c181273ba90b1	v7.0.1

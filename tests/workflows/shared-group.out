@@ -1,0 +1,1 @@
+wf_concurrency	top level: group without ${{ github.run_id }} on a push, merge_group or workflow_call run

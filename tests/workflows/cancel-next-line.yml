@@ -1,0 +1,13 @@
+on: push
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.run_id }}
+  cancel-in-progress:
+    true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo

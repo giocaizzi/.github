@@ -1,0 +1,11 @@
+# a multi-line quoted job name whose continuation looks like the job timeout; expected: fake-timeout.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    name: "Build
+    timeout-minutes: 5"
+    steps:
+      - run: echo
