@@ -84,15 +84,15 @@ BEGIN {
         else if (val != "") unparsed("flow-style job " key)
         endjob(); job = key; timeout = 0; reusable = 0; jconc = 0; njobs++
       } else if (job == "" || ind == 1 || ind == 3) unparsed("indent")
-      else if (ind == 4) {
-        if (dash || key == "") unparsed("job key " rest)
+      else if (ind == 4 && !dash) { # a job key (`    - ...` is a list item of the key above, e.g. compact `steps:`)
+        if (key == "") unparsed("job key " rest)
         if (key == "timeout-minutes" && val != "") timeout = 1
         if (key == "uses") reusable = 1
         if (key == "permissions") { if (val != "") perm(val, "job " job); else pblk = 4 }
         if (key == "concurrency") { jconc = 1; if (val != "") conc_flow(val); else { cblk = 4; groups[++ng] = "" } }
       }
     }
-    if ((key == "permissions" || key == "concurrency") && !(sec == "jobs" && ind == 4)) unparsed(key " key")
+    if ((key == "permissions" || key == "concurrency") && !(sec == "jobs" && ind == 4 && !dash)) unparsed(key " key")
   }
 
   if (key == "uses") {
