@@ -3,7 +3,7 @@
 # - local_ok: where a `./` ref may point (sourced helpers);
 # - a missing checker lock is a crash, so nothing passes and the run is broken;
 # - an API failure and a truncated repo tree stop an audit with exit 2, never drift (tests/fake-gh/gh).
-# shellcheck disable=SC2154,SC2329 # pin_cache and broken come from the sourced sync.sh; t() calls not_ok
+# shellcheck disable=SC2154,SC2317,SC2329 # pin_cache and broken come from the sourced sync.sh; t() calls not_ok
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fail=0
