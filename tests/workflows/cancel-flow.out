@@ -1,1 +1,1 @@
-wf_concurrency	job a: cancel-in-progress: true on a push or merge_group run
+wf_concurrency	job a: cancel-in-progress: true on a push, merge_group or workflow_call run

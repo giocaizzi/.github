@@ -1,4 +1,5 @@
-on: push
+# an alias inside a flow value: the parser resolves it, so the aliased step's ref is checked; expected: alias-in-flow.out
+on: workflow_dispatch
 permissions:
   contents: read
 jobs:
@@ -6,5 +7,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - {<<: *s}
+      - &evil {uses: evil/a@main}
+  b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps: [*evil]

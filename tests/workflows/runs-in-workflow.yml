@@ -1,0 +1,9 @@
+# a workflow file that also has runs: (both kinds at once) fails closed; expected: runs-in-workflow.out
+on: push
+permissions: {}
+jobs:
+  a: {runs-on: x, timeout-minutes: 5, steps: [{run: "true"}]}
+runs:
+  using: composite
+  steps:
+    - uses: evil/x@main

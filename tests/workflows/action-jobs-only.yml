@@ -1,0 +1,5 @@
+# an action.yml (by its path) with workflow content and no runs: never read as a workflow; expected: action-jobs-only.out
+on: push
+permissions: {}
+jobs:
+  a: {runs-on: x, timeout-minutes: 5, steps: [{run: "true"}]}

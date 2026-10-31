@@ -1,0 +1,14 @@
+# a reusable workflow runs in its caller's context (maybe a push): a shared cancelling group is not allowed;
+# expected: reusable-cancel.out
+on: workflow_call
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo

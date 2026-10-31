@@ -1,0 +1,23 @@
+# job container and service images follow the digest rule; expected: images.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container: node:22
+    services:
+      db:
+        image: postgres:16
+      cache:
+        image: redis@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    steps:
+      - run: echo
+  b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: docker://node@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    steps:
+      - run: echo

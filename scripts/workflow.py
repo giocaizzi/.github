@@ -47,7 +47,13 @@ EXPR = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 RUN_ID = re.compile(r"\$\{\{[^}]*\bgithub\.run_id\b[^}]*\}\}")
 LEVELS = {"read", "write", "none"}
 PR_EVENTS = {"pull_request", "pull_request_target"}
-GUARDED_EVENTS = {"push", "merge_group"}  # their runs are never cancelled or replaced
+# their runs are never cancelled or replaced; a reusable workflow (workflow_call) runs in its caller's context, whose
+# event may be one of them
+GUARDED_EVENTS = {"push", "merge_group", "workflow_call"}
+MINUTES = re.compile(r"[1-9][0-9]*")  # plain decimal: YAML 1.2 core reads `1_0`, `0b101`, `0x_1` as strings
+ONE_EXPR = re.compile(r"\$\{\{([^}]*)\}\}")
+CONSTANT = re.compile(r"-?[0-9.]+|'[^']*'|true|false|null")
+IMAGE = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
 
 
 class UnreadableError(Exception):
@@ -140,6 +146,9 @@ class Checker:
         if not REMOTE.fullmatch(value):
             self.bad("wf_pinned", f"not pinned by SHA: {value}")
             return
+        if {".", ".."} & set(value.rsplit("@", 1)[0].split("/")):  # the runner joins the path without a check
+            self.bad("wf_pinned", f"`.` or `..` path segment in a remote ref: {value}")
+            return
         end = node.end_mark
         comment = VERSION.fullmatch(self.lines[end.line][end.column :]) if end.line < len(self.lines) else None
         if comment is None:
@@ -177,9 +186,12 @@ class Checker:
         if not guarded:
             return
         if not RUN_ID.search(text(group) or ""):
-            self.bad("wf_concurrency", f"{where}: group without ${{{{ github.run_id }}}} on a push or merge_group run")
+            self.bad(
+                "wf_concurrency",
+                f"{where}: group without ${{{{ github.run_id }}}} on a push, merge_group or workflow_call run",
+            )
         if cancel is not None and is_true(cancel):
-            self.bad("wf_concurrency", f"{where}: cancel-in-progress: true on a push or merge_group run")
+            self.bad("wf_concurrency", f"{where}: cancel-in-progress: true on a push, merge_group or workflow_call run")
 
     def steps(self, node: Node, where: str) -> None:
         """Check the `uses` of every step."""
@@ -239,7 +251,24 @@ class Checker:
             return True
         if "steps" in job:
             self.steps(job["steps"], where)
+        self.images(job, where)
         return positive_minutes(job.get("timeout-minutes"))
+
+    def images(self, job: dict[str, Node], where: str) -> None:
+        """Check the job's container and service images: pinned by digest."""
+        found: list[tuple[Node, str]] = []
+        if "container" in job:
+            found.append((job["container"], f"{where} container"))
+        if "services" in job:
+            found += [(service, f"{where} service {name}") for name, service in pairs(job["services"], where).items()]
+        for node, label in found:
+            image = node if isinstance(node, ScalarNode) else pairs(node, label).get("image")
+            value = text(image)
+            if value is None:
+                msg = f"{label}: image is not a string"
+                raise UnreadableError(msg)
+            if not IMAGE.fullmatch(value.removeprefix("docker://")):
+                self.bad("wf_pinned", f"{label}: image not pinned by sha256 digest: {value}")
 
     def action(self, root: dict[str, Node]) -> None:
         """Check action metadata: composite steps and a docker image."""
@@ -252,15 +281,13 @@ class Checker:
 
 
 def positive_minutes(node: Node | None) -> bool:
-    """Tell whether a `timeout-minutes` value is a positive integer or an expression."""
-    if node is None:
+    """Tell whether a `timeout-minutes` value is a plain positive integer or one non-constant expression."""
+    if not isinstance(node, ScalarNode):
         return False
     if tag(node) == INT:
-        try:
-            return int(str(node.value), 0) > 0
-        except ValueError:
-            return False
-    return bool(EXPR.fullmatch(text(node) or ""))
+        return bool(MINUTES.fullmatch(str(node.value)))
+    match = ONE_EXPR.fullmatch(text(node) or "")
+    return match is not None and not CONSTANT.fullmatch(match.group(1).strip())
 
 
 def check_mappings(node: Node, seen: set[int]) -> None:
@@ -310,17 +337,23 @@ def load(raw: bytes, checker: Checker) -> dict[str, Node]:
     return pairs(documents[0], "top level")
 
 
-def run(raw: bytes) -> list[str]:
-    """Check one file and return its result lines."""
+def run(raw: bytes, *, action: bool) -> list[str]:
+    """Check one file, a workflow or (`action`) action metadata, and return its result lines.
+
+    The kind comes from the file's path, never from its content: an action.yml that also carries `jobs:` must not be
+    read as a workflow, which would leave its `runs` unchecked.
+    """
     checker = Checker(lines=[])
     try:
         root = load(raw, checker)
-        if "jobs" in root:
-            checker.workflow(root)
-        elif "runs" in root:
+        if "jobs" in root and "runs" in root:
+            checker.bad("wf_parsed", "both jobs: and runs: at the top level")
+        elif action and "runs" in root:
             checker.action(root)
+        elif not action and "jobs" in root:
+            checker.workflow(root)
         else:
-            checker.bad("wf_parsed", "neither jobs: nor runs:")
+            checker.bad("wf_parsed", "action metadata without runs:" if action else "workflow without jobs:")
     except UnreadableError as exc:
         checker.bad("wf_parsed", str(exc))
     except YAMLError as exc:
@@ -333,5 +366,7 @@ def run(raw: bytes) -> list[str]:
 
 
 if __name__ == "__main__":
-    for result in run(sys.stdin.buffer.read()):
+    if sys.argv[1:] not in ([], ["--action"]):
+        sys.exit("usage: workflow.py [--action] < file")
+    for result in run(sys.stdin.buffer.read(), action=sys.argv[1:] == ["--action"]):
         sys.stdout.write(result + "\n")
