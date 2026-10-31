@@ -1,8 +1,10 @@
 # CI hygiene of one GitHub Actions workflow (docs/standard.md, CI hygiene). Reads the YAML on stdin.
 # -v mode=check (default) prints one `<check id><TAB><detail>` line per failed rule, nothing when it passes:
-#   wf_parsed       the file is in the layout this checker reads (block style, 2-space indent: triggers and jobs at 2,
-#                   job keys at 4); anything else (flow-style `on:`, `jobs:` or a job, other indents, YAML aliases or
-#                   merge keys, a `uses`, `permissions` or `concurrency` key it cannot place) fails closed here
+#   wf_parsed       the file is in the line subset this checker reads (block style, 2-space indent: triggers and jobs
+#                   at 2, job keys at 4); anything else fails closed here: flow-style `on:`, `jobs:` or a job, other
+#                   or tab indents, aliases, merge keys, tags, explicit keys, quoted or flow values not closed on their
+#                   line, and a `uses`, `permissions`, `concurrency` or `timeout-minutes` key that is not the line's own
+#                   parsed key (docs/standard.md lists them; a fail-closed subset, not a YAML parser)
 #   wf_permissions  top-level `permissions:` set; no `write-all` anywhere (top level or job); every value parsed
 #   wf_timeout      every job sets `timeout-minutes:` (a job that calls a reusable workflow cannot)
 #   wf_concurrency  a pull_request workflow sets `concurrency:` (top level, or on every job); in a workflow that also
@@ -44,18 +46,30 @@ BEGIN {
   ind = match($0, /[^ ]/) ? RSTART - 1 : -1
   if (bs >= 0) { if (ind < 0 || ind > bs) { emit(); next }; bs = -1 } # block scalar content (`run: |`)
   if (ind < 0 || substr($0, ind + 1, 1) == "#") { emit(); next }
+  if ($0 ~ /^ *\t/) unparsed("tab indentation")
   rest = substr($0, ind + 1); dash = 0; kind = ind
   if (rest ~ /^-([ \t]|$)/) { dash = 1; r2 = rest; sub(/^-[ \t]*/, "", r2); kind = ind + length(rest) - length(r2); rest = r2 }
-  key = ""; val = rest; cm = ""
+  # YAML this checker does not read: explicit keys (`? k` / `: v`), tags, anchors or aliases on a key, directives,
+  # block scalars as list items; each fails closed rather than hiding what follows
+  if (rest ~ /^[?:!&*%@`|>]/) unparsed("YAML form not read: " rest)
+  key = ""; val = rest; cm = ""; qkey = 0
   if (rest !~ /^[{[]/ && match(rest, /^("[^"]*"|'[^']*'|[^"'#:][^:]*)[ \t]*:([ \t]|$)/)) {
-    key = substr(rest, 1, RLENGTH); sub(/[ \t]*:[ \t]*$/, "", key); key = unq(trim(key)); val = substr(rest, RLENGTH + 1)
+    key = substr(rest, 1, RLENGTH); sub(/[ \t]*:[ \t]*$/, "", key); key = trim(key); val = substr(rest, RLENGTH + 1)
+    if (key ~ /^["']/) { qkey = 1; if (key ~ /\\/) unparsed("escape in a quoted key"); key = unq(key) }
   }
   if (match(val, /(^|[ \t])#.*$/)) { cm = trim(substr(val, RSTART)); sub(/^#[ \t]*/, "", cm); val = substr(val, 1, RSTART - 1) }
   val = trim(val)
   if (val ~ /^\*/ || key == "<<") unparsed("YAML alias or merge key")
   if (val ~ /^&/) sub(/^&[^ \t]*[ \t]*/, "", val) # an anchor, then the value
-  if (val ~ /^[|>][-+0-9]*$/) bs = kind
-  if (key == "" && rest ~ /(^|[{,])[ \t]*["']?(uses|permissions|concurrency)["']?[ \t]*:/) unparsed("flow-style mapping " rest)
+  if (val ~ /^!/) unparsed("YAML tag")
+  # a scalar or flow value must end on its own line: a continuation line could fake a key or open a block scalar
+  if (val ~ /^"/ && val !~ /^"([^"\\]|\\.)*"$/) unparsed("quoted value not closed on its line")
+  if (val ~ /^'/ && val !~ /^'([^']|'')*'$/) unparsed("quoted value not closed on its line")
+  if ((val ~ /^\[/ && val !~ /\]$/) || (val ~ /^\{/ && val !~ /\}$/)) unparsed("flow value not closed on its line")
+  if (key != "" && !qkey && val ~ /^[|>][-+0-9]*$/) bs = kind # a block scalar header is the whole value of a plain key
+  # the four keys this checker relies on are read only where it parsed them as the key of this line
+  tk = (key == "uses" || key == "permissions" || key == "concurrency" || key == "timeout-minutes") ? val : (key != "" ? key ": " val : val)
+  if (tk ~ /(^|[^A-Za-z0-9_-])["']?(uses|permissions|concurrency|timeout-minutes)["']?[ \t]*:/) unparsed("key not read: " rest)
 
   if (ind == 0) {
     if (dash || key == "") { unparsed("top-level line"); emit(); next }
