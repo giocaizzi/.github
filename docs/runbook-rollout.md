@@ -27,7 +27,7 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 ## Apply, in this order (low risk first)
 1. **Settings**: `scripts/sync.sh apply settings <repo>` (repo settings and Dependabot alerts + security updates on every repo; secret scanning and private vulnerability reporting on public repos).
 2. **Labels**: `scripts/sync.sh apply labels <repo>` creates `standard/labels.yaml` plus the repo's `.github/labels.yaml` extras and deletes every other label (and strips it from issues). To keep a repo-only label, merge it into that repo's `.github/labels.yaml` first. Run it on every repo after `standard/labels.yaml` drops a label.
-3. **Workflows**: `scripts/sync.sh apply workflows <repo>` opens a PR with `standard/workflows/*` (PR title check); merge it.
+3. **Workflows**: `scripts/sync.sh apply workflows <repo>` opens a PR with `standard/workflows/*` (PR title check); merge it. A copy that differs only in its `uses:` refs (a Dependabot bump) is left alone. The repo's own workflows (`ci.yml` and any other) meet the [CI hygiene](standard.md#ci-hygiene) rules by hand, via PR: `scripts/sync.sh audit <repo>` names each file and job that fails `wf_permissions`, `wf_timeout`, `wf_concurrency` or `wf_pinned`.
    Once the PR with `todo-issues.yml` is merged, `scripts/sync.sh apply todos <repo>` imports the repo's existing TODOs as `todo` issues (safe to rerun: titles are deduplicated).
 4. **Agent ignore**: `scripts/sync.sh apply gitignore <repo>` opens a PR appending the missing `standard/gitignore-agents` lines to `.gitignore`; merge it.
 5. **CI**: land a `check` job (and `make check`) in the repo first, via PR.
