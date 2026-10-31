@@ -12,4 +12,5 @@ Gotchas
 - `greenhouse` is the reference implementation; change the standard here first, then the repos.
 - Never apply the ruleset to a repo that lacks a `check` job: it blocks every merge.
 - Every repo needs exactly one `std-<type>` topic; the audit fails it otherwise.
+- The workflow checker is `scripts/workflow.py` (uv, `ruamel.yaml` pinned in its header); after changing that pin, run `uv lock --script scripts/workflow.py`. `scripts/workflow.awk` only blanks or replaces refs (text modes).
 - This repo is public: never name a private repo or include private data in files, issues, PRs or artifacts here.

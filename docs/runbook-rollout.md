@@ -1,13 +1,13 @@
 # Runbook: audit and roll out the standard
 
-Prereqs: `gh` authenticated with `repo` + `administration` scope, `jq`, `shellcheck`.
+Prereqs: `gh` authenticated with `repo` + `administration` scope, `jq`, `shellcheck`, `uv` (the workflow checker `scripts/workflow.py` runs on it, with its pinned parser).
 
 ## Audit (read-only)
 ```bash
 make audit                      # all in-scope repos (VISIBILITY=public|private to narrow)
 scripts/sync.sh audit greenhouse # one repo
 ```
-Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope or the audit itself broke (a GitHub API error other than 404 while checking pins, or a crash of `scripts/workflow.awk`; the cause is printed). Output lists each failing check as `id: detail`.
+Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope or the audit itself broke (a GitHub API error other than 404 while checking pins, a failed fetch of a workflow, or a crash of `scripts/workflow.py` or `uv`; the cause is printed). Output lists each failing check as `id: detail`.
 
 JSON for the dashboard:
 ```bash
@@ -27,7 +27,7 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 ## Apply, in this order (low risk first)
 1. **Settings**: `scripts/sync.sh apply settings <repo>` (repo settings and Dependabot alerts + security updates on every repo; secret scanning and private vulnerability reporting on public repos).
 2. **Labels**: `scripts/sync.sh apply labels <repo>` creates `standard/labels.yaml` plus the repo's `.github/labels.yaml` extras and deletes every other label (and strips it from issues). To keep a repo-only label, merge it into that repo's `.github/labels.yaml` first. Run it on every repo after `standard/labels.yaml` drops a label.
-3. **Workflows**: `scripts/sync.sh apply workflows <repo>` opens a PR with `standard/workflows/*` (PR title check); merge it. A copy that differs only in its `uses:` refs, each a SHA its version tag resolves to upstream (a Dependabot bump), is left alone; any other copy is replaced, keeping the repo's verified pins newer than the standard's. The repo's own workflows (`ci.yml` and any other) meet the [CI hygiene](standard.md#ci-hygiene) rules by hand, via PR: `scripts/sync.sh audit <repo>` names each file and job that fails `wf_parsed`, `wf_permissions`, `wf_timeout`, `wf_concurrency` or `wf_pinned`.
+3. **Workflows**: `scripts/sync.sh apply workflows <repo>` opens a PR with `standard/workflows/*` (PR title check); merge it. A copy that differs only in its `uses:` refs, each a SHA its version tag resolves to upstream (a Dependabot bump), is left alone; any other copy is replaced, keeping the repo's verified pins newer than the standard's. The repo's own workflows (`ci.yml` and any other) meet the [CI hygiene](standard.md#ci-hygiene) rules by hand, via PR: `scripts/sync.sh audit <repo>` names each file (workflows and `action.yml`) and job that fails `wf_parsed`, `wf_permissions`, `wf_timeout`, `wf_concurrency` or `wf_pinned`.
    Once the PR with `todo-issues.yml` is merged, `scripts/sync.sh apply todos <repo>` imports the repo's existing TODOs as `todo` issues (safe to rerun: titles are deduplicated).
 4. **Agent ignore**: `scripts/sync.sh apply gitignore <repo>` opens a PR appending the missing `standard/gitignore-agents` lines to `.gitignore`; merge it.
 5. **CI**: land a `check` job (and `make check`) in the repo first, via PR.
