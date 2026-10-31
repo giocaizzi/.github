@@ -6,14 +6,19 @@
 #   <name>.yml prints <name>.norm and <name>.subst where present.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-check() { uv run --quiet --script --locked scripts/workflow.py; }
+# `--locked` runs unhashed when the lock is missing: the lock must be there
+test -f scripts/workflow.py.lock || { echo "scripts/workflow.py.lock missing"; exit 1; }
+check() { uv run --quiet --script --locked scripts/workflow.py "$@"; }
 fail=0
 for f in standard/workflows/*.yml .github/workflows/*.yml; do
-  out=$(check < "$f" | grep -v '^pin	' || true)
+  out=$(check < "$f") # no pipe: a crash fails the test
+  out=$(grep -v '^pin	' <<<"$out" || true)
   [ -z "$out" ] || { echo "$f: $out"; fail=1; }
 done
+# tests/workflows/action-*.yml are action metadata (checked with --action, as the audit does for action.yml)
 for f in tests/workflows/*.yml; do
-  check < "$f" | diff -u "${f%.yml}.out" - || { echo "workflow.py: $f"; fail=1; }
+  kind=""; case ${f##*/} in action-*) kind=--action ;; esac
+  check ${kind:+"$kind"} < "$f" | diff -u "${f%.yml}.out" - || { echo "workflow.py: $f"; fail=1; }
 done
 [ "$fail" = 0 ] && echo "workflow.py fixtures: ok"
 

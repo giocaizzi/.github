@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# A stand-in for `gh` in scripts/test-sync.sh: answers the few `gh api` calls an audit of repo `r` makes before
+# its workflow checks. FAKE_GH=fail makes the repo lookup fail (HTTP 502); FAKE_GH=truncated returns a truncated tree.
+set -euo pipefail
+[ "${1:-}" = api ] || { echo "fake gh: only api" >&2; exit 1; }
+path=$2 q=""
+while [ $# -gt 0 ]; do [ "$1" = -q ] && q=$2; shift; done
+case $path in
+  graphql) json='{"data":{"repository":{"squashMergeAllowed":true}}}' ;;
+  repos/*/.github/git/trees/*) json='{"truncated":false,"tree":[]}' ;;
+  repos/*/r)
+    [ "${FAKE_GH:-}" = fail ] && { echo "gh: Server Error (HTTP 502)" >&2; exit 1; }
+    json='{"private":true,"default_branch":"main","topics":["std-docs"],"has_pages":false}' ;;
+  repos/*/r/git/trees/*) json='{"truncated":true,"tree":[]}' ;;
+  *) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+esac
+if [ -n "$q" ]; then jq -r "$q" <<<"$json"; else printf '%s\n' "$json"; fi

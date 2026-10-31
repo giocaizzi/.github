@@ -1,47 +1,25 @@
 #!/usr/bin/env bash
 # Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|todos|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
-# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope or a broken run (API error other than 404, failed fetch, checker crash). `--json` prints a JSON array on stdout and the text report on stderr.
+# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope or a broken run (any failed API call or command, but a 404 tag lookup; a truncated tree; a checker crash). `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
 set -euo pipefail
 OWNER=${OWNER:-giocaizzi}
-DIR=$(cd "$(dirname "$0")/.." && pwd)
-
-mode=${1:-}
-if [ "$mode" = onboard ]; then
-  r=${2:?usage: sync.sh onboard <repo> <type> [flag,...]} t=${3:?usage: sync.sh onboard <repo> <type> [flag,...]}
-  # add std-<type> and std-<flag> topics, keeping existing ones
-  gh api "repos/$OWNER/$r/topics" -q .names | jq --arg t "$t" --arg f "${4:-}" \
-    '{names: (. + ([$t] + ($f | split(",")) | map(select(length > 0) | "std-" + .)) | unique)}' \
-    | gh api -X PUT "repos/$OWNER/$r/topics" --input - >/dev/null
-  for w in settings labels workflows gitignore claude-md; do "$0" apply "$w" "$r"; done
-  base=$(gh api "repos/$OWNER/$r" -q .default_branch)
-  sha=$(gh api "repos/$OWNER/$r/commits/$base" -q .sha)
-  ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
-  if [ "${ok:-0}" -gt 0 ]; then "$0" apply ruleset "$r"
-  else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
-  exec "$0" audit "$r"
-fi
-case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|todos|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
-shift
-json=0 vis=all
-while [ "$mode" = audit ] && [ $# -gt 0 ]; do
-  case $1 in --json) json=1; shift ;; --visibility) vis=${2:-}; shift 2 ;; *) break ;; esac
-done
-case $vis in public|private|all) ;; *) echo "--visibility: public|private|all" >&2; exit 2 ;; esac
-repos=("$@")
-[ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
-  gh repo list "$OWNER" --no-archived --source --limit 200 --json name,visibility \
-    | jq -r --arg v "$vis" '.[] | select($v == "all" or (.visibility | ascii_downcase) == $v) | .name' | grep -vx '.github')
-# Fail loudly instead of passing on an empty scope (e.g. a missing or under-scoped token).
-[ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
-
+DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # Workflow hygiene (scripts/workflow.py checks, scripts/workflow.awk text modes; rules in docs/standard.md, CI hygiene).
 WF=$DIR/scripts/workflow.awk
 pin_cache=$(mktemp) broken=$(mktemp) # `<owner/repo> <tag> <commit>` per tag looked up this run; what broke the run
-trap 'rm -f "$pin_cache" "$broken" "$broken.last"' EXIT
+# Exit 1 means drift only when the audit says so (`finish`): any other exit 1 (a failed command under `set -e`, e.g.
+# a GitHub API call) is a broken run and becomes exit 2, which audit.yml never reads as drift.
+on_exit() {
+  local rc=$?
+  rm -f "$pin_cache" "$broken" "$broken.last"
+  if [ "$rc" = 1 ] && [ -z "${finished:-}" ]; then echo "run broken (not drift): a command failed (see above)" >&2; exit 2; fi
+}
+trap on_exit EXIT
+finish() { finished=1; exit "$1"; }
 # A failure that is not drift (a GitHub API error other than 404, a failed fetch, a crash of the checker) is recorded in $broken;
 # broken_exit stops the run with exit 2 (the audit itself broke), so it never reaches the drift issue.
 broken_exit() {
@@ -73,19 +51,34 @@ tag_commit() {
 }
 # The checker: scripts/workflow.py on the pinned YAML parser (its lock file pins the hashes). A non-zero exit is a
 # crash, recorded in $broken; it never passes a file. Text modes (norm, subst) are scripts/workflow.awk.
-wf_check() { uv run --quiet --script --locked "$DIR/scripts/workflow.py"; }
-# the checker's output for the workflow or action.yml on stdin; after a crash, a wf_parsed finding (so nothing
-# passes) and a record in $broken (so the run exits 2)
+# `--locked` does not fail when the lock file is missing (it runs unhashed), so its absence is a crash here.
+wf_check() {
+  [ -f "$DIR/scripts/workflow.py.lock" ] || { echo "scripts/workflow.py.lock missing" >&2; return 3; }
+  uv run --quiet --script --locked "$DIR/scripts/workflow.py" "$@"
+}
+# the checker's output for the workflow (or, with --action, the action.yml) on stdin; after a crash, a wf_parsed
+# finding (so nothing passes) and a record in $broken (so the run exits 2)
 wf_out() {
   local out
-  out=$(wf_check) || { echo "scripts/workflow.py failed (exit $?)" >> "$broken"; printf 'wf_parsed\tscripts/workflow.py failed\n'; return 0; }
+  out=$(wf_check "$@") || { echo "scripts/workflow.py failed (exit $?)" >> "$broken"; printf 'wf_parsed\tscripts/workflow.py failed\n'; return 0; }
   [ -z "$out" ] || printf '%s\n' "$out"
 }
-# hygiene findings of the workflow or action.yml on stdin, `<id>\t<detail>`: the checker's, each pin checked
-# upstream, and each `./` ref found in the repo's file list $1 (an action.yml there, or a workflow file)
+# whether `./` ref $2 points at a regular file in the repo tree $1 (`<mode> <sha> <path>` lines): an action.yml or
+# action.yaml in that directory (the repo root for `./`), or the file itself (a local reusable workflow). A symlink
+# never counts: its target is not what the audit scanned. The path goes through ENVIRON, which awk does not unescape.
+local_ok() {
+  local p=${2#./}
+  p=${p%/}
+  P=$p awk 'BEGIN {p = ENVIRON["P"]; d = (p == "" ? "" : p "/")}
+    {m = $1; path = $0; sub(/^[^ ]+ [^ ]+ /, "", path)
+     if ((m == "100644" || m == "100755") && ((p != "" && path == p) || path == d "action.yml" || path == d "action.yaml")) f = 1}
+    END {exit !f}' <<<"$1"
+}
+# hygiene findings of the workflow on stdin (with $2 = --action: an action.yml), `<id>\t<detail>`: the checker's,
+# each pin checked upstream, and each `./` ref found in the repo tree $1 (`<mode> <sha> <path>` lines)
 wf_findings() {
   local out kind a b c got
-  out=$(wf_out)
+  out=$(wf_out ${2:+"$2"})
   grep -E '^wf_' <<<"$out" || true
   while IFS=$'\t' read -r kind a b c; do
     case $kind in
@@ -97,9 +90,7 @@ wf_findings() {
           *) printf 'wf_pinned\t%s@%s is not %s upstream (tag is %s)\n' "$a" "$b" "$c" "$got" ;;
         esac ;;
       local)
-        b=${a#./}; b=${b%/}
-        awk -v p="$b" '$0 == p || $0 == p "/action.yml" || $0 == p "/action.yaml" {f = 1} END {exit !f}' <<<"${1:-}" \
-          || printf 'wf_pinned\tlocal ref %s: no action.yml or workflow at that path in the repo\n' "$a" ;;
+        local_ok "${1:-}" "$a" || printf 'wf_pinned\tlocal ref %s: no action.yml or workflow file at that path in the repo\n' "$a" ;;
     esac
   done <<<"$out"
 }
@@ -124,6 +115,39 @@ newer_pins() {
       && printf '%s=%s # %s;' "$repo" "$sha" "$tag"
   done <<<"$v" || true # a loop ending on a false test is not a failure
 }
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by scripts/test-sync.sh for the helpers above
+
+
+mode=${1:-}
+if [ "$mode" = onboard ]; then
+  r=${2:?usage: sync.sh onboard <repo> <type> [flag,...]} t=${3:?usage: sync.sh onboard <repo> <type> [flag,...]}
+  # add std-<type> and std-<flag> topics, keeping existing ones
+  gh api "repos/$OWNER/$r/topics" -q .names | jq --arg t "$t" --arg f "${4:-}" \
+    '{names: (. + ([$t] + ($f | split(",")) | map(select(length > 0) | "std-" + .)) | unique)}' \
+    | gh api -X PUT "repos/$OWNER/$r/topics" --input - >/dev/null
+  for w in settings labels workflows gitignore claude-md; do "$0" apply "$w" "$r"; done
+  base=$(gh api "repos/$OWNER/$r" -q .default_branch)
+  sha=$(gh api "repos/$OWNER/$r/commits/$base" -q .sha)
+  ok=$(gh api "repos/$OWNER/$r/commits/$sha/check-runs?check_name=check" -q '[.check_runs[]|select(.conclusion=="success")]|length')
+  if [ "${ok:-0}" -gt 0 ]; then "$0" apply ruleset "$r"
+  else echo "ruleset not applied: no green \`check\` on $base yet; merge the CI + workflows PRs, then run: sync.sh apply ruleset $r"; fi
+  exec "$0" audit "$r"
+fi
+case $mode in audit) ;; apply) what=${2:?settings|labels|workflows|gitignore|claude-md|todos|ruleset}; shift ;; *) echo "usage: $0 audit|apply|onboard ..." >&2; exit 2 ;; esac
+shift
+json=0 vis=all
+while [ "$mode" = audit ] && [ $# -gt 0 ]; do
+  case $1 in --json) json=1; shift ;; --visibility) vis=${2:-}; shift 2 ;; *) break ;; esac
+done
+case $vis in public|private|all) ;; *) echo "--visibility: public|private|all" >&2; exit 2 ;; esac
+repos=("$@")
+[ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
+  gh repo list "$OWNER" --no-archived --source --limit 200 --json name,visibility \
+    | jq -r --arg v "$vis" '.[] | select($v == "all" or (.visibility | ascii_downcase) == $v) | .name' | grep -vx '.github')
+# Fail loudly instead of passing on an empty scope (e.g. a missing or under-scoped token).
+[ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
+
+
 label_names() { { grep -oE 'name: ("[^"]+"|[^,}]+)' || true; } | sed -E 's/name: //; s/"//g'; }
 want_labels=$(label_names < "$DIR/standard/labels.yaml")
 # create or update the labels.yaml lines on stdin in repo $r; `extra` skips a name the standard defines
@@ -252,7 +276,7 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
   chk() { rec+="$1	$2	$3	${4:-}"$'\n'; }        # id kind pass|present detail
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
-  raw() { if has "${1//./\\.}"; then gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; fi; }
+  raw() { if has "${1//./\\.}"; then fetch "$1"; fi; } # a file the tree lists; a failed fetch is a broken run
   # a file the hygiene checks read: a failed fetch is a broken run (recorded), never empty input read as drift
   fetch() {
     gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
@@ -304,7 +328,10 @@ for r in "${repos[@]}"; do
       squash_merge_commit_message: $g.squashMergeCommitMessage}' <<<"$s")
   priv=$(jq -r .private <<<"$s")
   base=$(jq -r .default_branch <<<"$s")
-  entries=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1" -q '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"')
+  tree=$(gh api "repos/$OWNER/$r/git/trees/$base?recursive=1")
+  # a truncated tree would drop files from the checks: a broken run, not a pass
+  [ "$(jq -r .truncated <<<"$tree")" = false ] || { echo "git tree of $r truncated by the API" >> "$broken"; broken_exit; }
+  entries=$(jq -r '.tree[]|select(.type=="blob")|"\(.mode) \(.sha) \(.path)"' <<<"$tree")
   paths=$(cut -d' ' -f3- <<<"$entries")
   m=$(jq -c -f "$DIR/scripts/meta.jq" <<<"$s")
   type=$(jq -r .type <<<"$m")
@@ -322,7 +349,9 @@ for r in "${repos[@]}"; do
   # CI hygiene of every workflow and every action.yml (local actions): one check per rule, details prefixed by file
   hyg="" tab=$'\t'
   while IFS= read -r f; do
-    [ -n "$f" ] && hyg+=$(fetch "$f" | wf_findings "$paths" | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
+    [ -n "$f" ] || continue
+    kind=""; [[ $f =~ (^|/)action\.ya?ml$ ]] && kind=--action # the file kind comes from its path, never its content
+    hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
   done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$|^(.*/)?action\.ya?ml$' <<<"$paths")
   broken_exit
   for w in pr-title label-guard todo-issues; do
@@ -456,6 +485,7 @@ for r in "${repos[@]}"; do
   chk changelog extra "$(ok has '(.*/)?CHANGELOG\.md')"
   chk docs_site extra "$(jq -r '.has_pages or ((.homepage // "") != "")' <<<"$s")"
 
+  broken_exit # a failed fetch above is a broken run, never drift
   fails=$(awk -F'\t' '$2!="extra" && $3=="false" {print $1": "$4}' <<<"$rec")
   if [ -z "$fails" ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; while IFS= read -r l; do printf '        %s\n' "$l"; done <<<"$fails"; fi
   results+=$(jq -n --arg repo "$r" --arg type "$type" --argjson released "$released" --argjson private "$priv" --arg ex "$ex" --arg rec "$rec" '
@@ -468,4 +498,4 @@ for r in "${repos[@]}"; do
      score: {standard: score("standard"), typed: score("typed"), extras: "\($e | map(select(.pass)) | length)/\($e | length)"}}')$'\n'
 done
 [ $json = 1 ] && jq -s . <<<"$results" >&3
-exit $drift
+finish $drift

@@ -5,7 +5,8 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 lint: ## shellcheck scripts, validate JSON, ruff and mypy --strict on the workflow checker (through uv)
-	shellcheck scripts/*.sh
+	shellcheck scripts/*.sh tests/fake-gh/gh
+	@# lint tools are pinned by version, not by hash (lint only; the checker itself runs from its hashed lock)
 	jq empty standard/*.json
 	uvx --quiet ruff@0.17.1 check scripts/workflow.py
 	uvx --quiet ruff@0.17.1 format --check scripts/workflow.py
@@ -14,6 +15,7 @@ lint: ## shellcheck scripts, validate JSON, ruff and mypy --strict on the workfl
 test: ## Smoke-test: the audit script parses, the topic parser reads type and flags, the workflow checker flags what it should (every awk on PATH), the standard workflow copies match
 	bash -n scripts/sync.sh
 	scripts/test-workflow.sh
+	scripts/test-sync.sh
 	@# Dependabot bumps .github/workflows/ only: a bump here must also land in standard/workflows/ (cp, see docs/runbook-rollout.md)
 	for w in pr-title label-guard todo-issues; do cmp standard/workflows/$$w.yml .github/workflows/$$w.yml || exit 1; done
 	echo '{"topics":["gis","std-python","std-released","std-exception-agent-ignore"]}' | jq -ef scripts/meta.jq \
