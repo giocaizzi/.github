@@ -53,7 +53,7 @@ Every repo runs `standard/workflows/todo-issues.yml` (`alstr/todo-to-issue-actio
   - Released: `release-please-config.json` with `"release-type": "go"` (tags `v*`, as Go module versions need).
 
 ## CI hygiene
-Every workflow in `.github/workflows/`, the standard's own included, and every `action.yml` in the repo (local actions). `scripts/workflow.py` checks each file (see [Audit](#audit)). It parses the file with a real YAML 1.2 parser, `ruamel.yaml` (version pinned in the script, hashes in `scripts/workflow.py.lock`, run through `uv run --script --locked`), and reads every rule from the parsed tree. It fails `wf_parsed`, and so fails closed, on:
+Every workflow in `.github/workflows/`, the standard's own included, and every `action.yml` in the repo (local actions). `scripts/workflow.py` checks each file (see [Audit](#audit)). The kind of a file comes from its path (`action.yml` / `action.yaml` is action metadata, checked with `--action`), never from its content; a file with both `jobs:` and `runs:` fails `wf_parsed`. It parses the file with a real YAML 1.2 parser, `ruamel.yaml` (version pinned in the script, hashes in `scripts/workflow.py.lock`, run through `uv run --script --locked`), and reads every rule from the parsed tree. It fails `wf_parsed`, and so fails closed, on:
   - a YAML error;
   - a duplicate key, anywhere in the file;
   - a merge key (`<<`) or an explicit tag (`!!bool`, `!x`);
@@ -61,8 +61,8 @@ Every workflow in `.github/workflows/`, the standard's own included, and every `
   - a structure it does not expect where a rule reads (a step that is not a mapping, a trigger that is not a string, ...);
   - a byte-level tripwire: a CR left after CRLF is folded, NEL, LS or PS, or input that is not UTF-8. YAML parsers disagree on those line breaks.
 
-  Anchors and aliases are resolved by the parser. A leading BOM is dropped, as YAML does. A crash of the checker, or of `uv`, stops the audit with exit 2 (the audit broke), never a pass. Each rule has a fixture in `tests/workflows/`.
-- **Timeouts**: every job sets `timeout-minutes` to a positive integer or an expression (a job that calls a reusable workflow cannot; the called workflow's jobs set it). A job that runs out fails, so a required check turns red, never skipped.
+  Anchors and aliases are resolved by the parser. A leading BOM is dropped, as YAML does. A crash of the checker, or of `uv`, or a missing `scripts/workflow.py.lock` (`--locked` would run unhashed) stops the audit with exit 2 (the audit broke), never a pass. Each rule has a fixture in `tests/workflows/`; `scripts/test-sync.sh` covers the audit's own decisions.
+- **Timeouts**: every job sets `timeout-minutes` to a plain positive decimal integer (not `1_0`, `0b101`, `010`) or to one `${{ }}` expression that is not a constant (a job that calls a reusable workflow cannot; the called workflow's jobs set it). A job that runs out fails, so a required check turns red, never skipped.
 - **Permissions**: top-level `permissions:` with the least the workflow needs (`contents: read` unless it needs more), widened per job where one job needs more; never `write-all`, at the top level or on a job; an empty `permissions:` fails too.
 - **Concurrency**: a workflow that runs on `pull_request` sets `concurrency:`, one group per event, and cancels in progress only for `pull_request` (a superseded run on the same PR; the run for the new head still reports every check). `merge_group` runs and default-branch pushes are never cancelled. A group with `cancel-in-progress: false` still replaces a pending run, so those runs get a group of their own (`github.run_id`):
   ```yaml
@@ -71,22 +71,23 @@ Every workflow in `.github/workflows/`, the standard's own included, and every `
     group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   ```
-  In a workflow that also runs on `push` or `merge_group`:
+  In a workflow that also runs on `push`, `merge_group` or `workflow_call` (a reusable workflow runs in its caller's context, which may be a push):
   - every concurrency group (top level or job) must use `github.run_id` inside a `${{ }}` expression;
   - a literal true `cancel-in-progress` (`true`, `"true"`, `yes`, `${{ true }}`) fails the audit.
 
   Known limits:
   - That the group gives each such run its own value is not proven, only that the expression uses `github.run_id`: copy the block above.
-  - Only push and merge_group runs are protected. A workflow on `pull_request` and `schedule` (or `workflow_dispatch`) with a shared group and `cancel-in-progress: true` lets a PR run cancel a scheduled run. The block above avoids that; the audit does not check it.
+  - Only push, merge_group and reusable (workflow_call) runs are protected. A workflow on `pull_request` and `schedule` (or `workflow_dispatch`) with a shared group and `cancel-in-progress: true` lets a PR run cancel a scheduled run. The block above avoids that; the audit does not check it.
 - **Merge queue**: where a repo has one, every workflow that reports a required check also triggers on `merge_group`. User-owned repos have none (see [Ruleset](#ruleset-standardruleset-mainjson)); `pr-title.yml` carries the trigger already.
 - **Pinned actions**: every `uses:` of a workflow step, a reusable-workflow job or a composite action step names a full commit SHA with its version tag as a comment on the same line (`actions/checkout@<sha> # v7.0.1`).
-  - A `docker://` ref, in a step or as an action's `runs.image`, needs an image digest (`docker://alpine@sha256:<64 hex>`).
-  - A local `./` ref must point at an `action.yml` (or a workflow file) in the repo, and that `action.yml` is checked by the same rules. A `./` ref that climbs out of the repo (`..`) fails. The audit resolves each tag upstream (`git/ref/tags/<tag>`, annotated tags dereferenced) and fails a SHA that is not the commit the tag points to, so a made-up, forked or mislabelled SHA does not pass. Dependabot bumps the SHA and the comment.
+  - A remote ref with a `.` or `..` path segment fails (the runner joins that path onto the pinned checkout without a check).
+  - A `docker://` ref, in a step or as an action's `runs.image`, and a job's `container` and `services` images need an image digest (`alpine@sha256:<64 hex>`).
+  - A local `./` ref must point at a regular file in the repo: an `action.yml` / `action.yaml` in that directory (the repo root for `./`), or a workflow file. That `action.yml` is checked by the same rules. A symlink never counts, and a `./` ref that climbs out of the repo (`..`) fails. The audit resolves each tag upstream (`git/ref/tags/<tag>`, annotated tags dereferenced) and fails a SHA that is not the commit the tag points to, so a made-up, forked or mislabelled SHA does not pass. Dependabot bumps the SHA and the comment.
   - Known limits:
     - An older release pinned correctly passes; Dependabot (`github-actions`, plus security updates) moves it forward.
     - Verification trusts where the tag points today: if upstream moves a tag (a retag or a compromise), its new commit passes, and the old, correct pin fails, which is drift, not a pass.
     - A major-tag comment (`# v7`) passes only until the next `v7.x` moves that tag.
-  - Only an HTTP 404 counts as "tag not found". Any other API failure (token, 403, rate limit, 5xx), or a crash of the checker, stops the audit with exit 2 (the audit broke) and prints the cause, so it never reaches the drift issue.
+  - Only an HTTP 404 counts as "tag not found". Any other failure stops the audit with exit 2 (the audit broke) and prints the cause, so it never reaches the drift issue: an API error (token, 403, rate limit, 5xx) on a tag, a file, the repo or its tree, a truncated repo tree, a crash of the checker, or any other failed command. The settings probes that answer 404 for "disabled" (Dependabot alerts and security updates, private vulnerability reporting) read any failure as disabled, which is drift.
   - The standard workflows here are pinned too. A repo's copy matches the standard when it is byte-equal, or equal but for refs that each pass that check, so a Dependabot bump in the repo is not drift; an unpinned or unverified ref is drift.
   - `sync.sh apply workflows` leaves such a copy alone, replaces any other (an unpinned one included), and when it replaces a copy it keeps the repo's verified pins that are newer than the standard's: it never downgrades a pin.
   - Dependabot here bumps `.github/workflows/` only, not `standard/workflows/`; `make test` fails until the same bump is copied there (`cp .github/workflows/{pr-title,label-guard,todo-issues}.yml standard/workflows/`), so the two stay equal.
