@@ -4,9 +4,12 @@
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-8s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-lint: ## shellcheck scripts, validate JSON
+lint: ## shellcheck scripts, validate JSON, ruff and mypy --strict on the workflow checker (through uv)
 	shellcheck scripts/*.sh
 	jq empty standard/*.json
+	uvx --quiet ruff@0.17.1 check scripts/workflow.py
+	uvx --quiet ruff@0.17.1 format --check scripts/workflow.py
+	uv run --quiet --no-project --with mypy==2.4.0 --with ruamel.yaml==0.19.1 mypy --strict scripts/workflow.py
 
 test: ## Smoke-test: the audit script parses, the topic parser reads type and flags, the workflow checker flags what it should (every awk on PATH), the standard workflow copies match
 	bash -n scripts/sync.sh

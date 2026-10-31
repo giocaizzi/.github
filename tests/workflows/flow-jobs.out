@@ -1,1 +1,2 @@
-wf_parsed	line 5: key not read: jobs: {a: {runs-on: ubuntu-latest, steps: [{uses: actions/checkout@v7}]}}; line 5: flow-style jobs:; no job found under jobs:
+wf_timeout	jobs without a positive timeout-minutes: a
+wf_pinned	not pinned by SHA: actions/checkout@v7

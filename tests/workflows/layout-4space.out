@@ -1,1 +1,2 @@
-wf_parsed	line 7: indent; line 8: indent; line 9: indent; line 10: indent; no trigger found under on:; no job found under jobs:
+wf_timeout	jobs without a positive timeout-minutes: a
+wf_concurrency	pull_request trigger without concurrency

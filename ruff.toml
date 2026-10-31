@@ -1,0 +1,13 @@
+# scripts/workflow.py (the only Python here); `make lint` runs ruff and mypy --strict on it through uv
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["ALL"]
+ignore = [
+  "COM812", "ISC001",  # conflict with ruff format
+  "CPY001",  # no copyright headers in this repo
+]
+
+[lint.pydocstyle]
+convention = "google"

@@ -1,0 +1,1 @@
+wf_parsed	YAML: found undefined alias 's' in "<unicode string>", line 10, column 14: - {<<: *s} ^ (line: 10)

@@ -1,1 +1,1 @@
-wf_concurrency	cancel-in-progress: true on a push or merge_group run
+wf_concurrency	top level: cancel-in-progress: true on a push or merge_group run

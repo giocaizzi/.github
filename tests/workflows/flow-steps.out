@@ -1,1 +1,1 @@
-wf_parsed	line 9: key not read: steps: [{uses: evil/a@main}]
+wf_pinned	not pinned by SHA: evil/a@main

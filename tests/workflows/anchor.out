@@ -1,2 +1,1 @@
-wf_parsed	line 8: YAML alias or merge key; line 8: permissions value *p
-wf_permissions	top level: permissions: write-all
+wf_permissions	top level: permissions: write-all; job a: permissions: write-all
