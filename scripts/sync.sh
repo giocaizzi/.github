@@ -337,7 +337,7 @@ for r in "${repos[@]}"; do
   # todo-issues pushes run on main or master only (its `branches:`)
   chk todo_issues_branch standard "$(ok grep -qxE 'main|master' <<<"$base")" "default branch $base: todo-issues triggers on main or master only"
   for c in wf_parsed wf_permissions wf_timeout wf_concurrency wf_pinned; do
-    d=$(awk -F'\t' -v c="$c" '$1==c{print $2}' <<<"$hyg" | paste -sd';' - | sed 's/;/; /g')
+    d=$(awk -F'\t' -v c="$c" '$1==c{print $2}' <<<"$hyg" | paste -sd';' - | sed 's/; */; /g')
     chk "$c" standard "$(ok test -z "$d")" "$d"
   done
   chk dependabot standard "$(ok has '\.github/dependabot\.ya?ml')" "no .github/dependabot.yml"
