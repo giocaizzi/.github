@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|todos|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
-# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope. `--json` prints a JSON array on stdout and the text report on stderr.
+# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope or a broken run (API error other than 404, checker crash). `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
@@ -40,47 +40,80 @@ repos=("$@")
 
 # Workflow hygiene (scripts/workflow.awk; rules in docs/standard.md, CI hygiene).
 WF=$DIR/scripts/workflow.awk
-pin_cache=$(mktemp); trap 'rm -f "$pin_cache"' EXIT # `<owner/repo> <tag> <commit>` per tag looked up this run
-# the commit tag $2 of $1 points to (annotated tags dereferenced), `-` when it cannot be read
+pin_cache=$(mktemp) broken=$(mktemp) # `<owner/repo> <tag> <commit>` per tag looked up this run; what broke the run
+trap 'rm -f "$pin_cache" "$broken" "$broken.last"' EXIT
+# A failure that is not drift (a GitHub API error other than 404, a crash of workflow.awk) is recorded in $broken;
+# broken_exit stops the run with exit 2 (the audit itself broke), so it never reaches the drift issue.
+broken_exit() {
+  [ -s "$broken" ] || return 0
+  { echo "audit broken (not drift):"; sed 's/^/  /' "$broken"; } >&2
+  exit 2
+}
+# `<type> <sha>` of the git object at API path $1; `- -` on HTTP 404; `! !` on any other failure (recorded)
+git_obj() {
+  local out
+  if out=$(gh api "$1" -q '"\(.object.type) \(.object.sha)"' </dev/null 2>"$broken.last"); then echo "$out"
+  elif grep -q 'HTTP 404' "$broken.last"; then echo "- -"
+  else echo "gh api $1: $(head -1 "$broken.last")" >> "$broken"; echo "! !"; fi
+}
+# the commit tag $2 of $1 points to (annotated tags dereferenced): `-` when the tag does not exist, `!` when the
+# lookup failed (recorded in $broken)
 tag_commit() {
   local hit type sha
   hit=$(awk -v r="$1" -v t="$2" '$1 == r && $2 == t {print $3; exit}' "$pin_cache")
   [ -n "$hit" ] && { echo "$hit"; return; }
-  read -r type sha < <(gh api "repos/$1/git/ref/tags/$2" -q '"\(.object.type) \(.object.sha)"' </dev/null 2>/dev/null || echo "- -")
+  read -r type sha < <(git_obj "repos/$1/git/ref/tags/$2")
   for _ in 1 2 3; do # tag objects can point to tags
     [ "$type" = tag ] || break
-    read -r type sha < <(gh api "repos/$1/git/tags/$sha" -q '"\(.object.type) \(.object.sha)"' </dev/null 2>/dev/null || echo "- -")
+    read -r type sha < <(git_obj "repos/$1/git/tags/$sha")
   done
+  [ "$type" = ! ] && { echo !; return; }
   [ "$type" = commit ] || sha=-
   echo "$1 $2 $sha" >> "$pin_cache"; echo "$sha"
 }
-# the pins of the workflow on stdin that match their version tag upstream, `<owner/repo>\t<sha>\t<version>`
+# the pins (`<owner/repo>\t<sha>\t<version>`) of workflow content $1; a crash of workflow.awk is recorded, not hidden
+pins_of() {
+  local p
+  p=$(awk -v mode=pins -f "$WF" <<<"$1") || { echo "workflow.awk -v mode=pins failed" >> "$broken"; return 1; }
+  [ -z "$p" ] || printf '%s\n' "$p"
+}
+# the pins of the workflow on stdin that match their version tag upstream
 verified_pins() {
-  local repo sha tag
-  awk -v mode=pins -f "$WF" | while IFS=$'\t' read -r repo sha tag; do
-    [ "$(tag_commit "$repo" "$tag")" = "$sha" ] && printf '%s\t%s\t%s\n' "$repo" "$sha" "$tag"
-  done || true # a loop ending on a false test is not a failure
+  local p repo sha tag
+  p=$(pins_of "$(cat)") || return 0
+  while IFS=$'\t' read -r repo sha tag; do
+    [ -n "$repo" ] && [ "$(tag_commit "$repo" "$tag")" = "$sha" ] && printf '%s\t%s\t%s\n' "$repo" "$sha" "$tag"
+  done <<<"$p" || true # a loop ending on a false test is not a failure; no pipe, so nothing else is hidden
 }
 # hygiene findings of the workflow on stdin, `<id>\t<detail>`: workflow.awk, plus each pin checked upstream
 wf_findings() {
-  local c repo sha tag got
+  local c p repo sha tag got
   c=$(cat)
   awk -f "$WF" <<<"$c" || printf 'wf_parsed\tworkflow.awk failed\n' # fail closed
-  awk -v mode=pins -f "$WF" <<<"$c" | while IFS=$'\t' read -r repo sha tag; do
+  p=$(pins_of "$c") || { printf 'wf_parsed\tworkflow.awk -v mode=pins failed\n'; return 0; }
+  while IFS=$'\t' read -r repo sha tag; do
+    [ -n "$repo" ] || continue
     got=$(tag_commit "$repo" "$tag")
-    [ "$got" = "$sha" ] || printf 'wf_pinned\t%s@%s is not %s upstream (%s)\n' "$repo" "$sha" "$tag" "$([ "$got" = - ] && echo "tag not found" || echo "tag is $got")"
-  done || true
+    case $got in
+      "$sha") ;;
+      !) ;; # recorded in $broken: the run exits 2
+      -) printf 'wf_pinned\t%s@%s: tag %s not found upstream\n' "$repo" "$sha" "$tag" ;;
+      *) printf 'wf_pinned\t%s@%s is not %s upstream (tag is %s)\n' "$repo" "$sha" "$tag" "$got" ;;
+    esac
+  done <<<"$p"
 }
 # true when the workflow on stdin has no unparsed line and every pin is a verified SHA with its version
 pins_ok() { local f; f=$(wf_findings); ! grep -qE '^(wf_parsed|wf_pinned)' <<<"$f"; } # no pipe: grep -q + pipefail would fail open
 # `owner/repo=<sha> # <version>;...` for the verified pins in workflow $1 (content) newer than those in file $2
 newer_pins() {
-  local repo sha tag std
-  verified_pins <<<"$1" | while IFS=$'\t' read -r repo sha tag; do
-    std=$(awk -v mode=pins -f "$WF" "$2" | awk -F'\t' -v r="$repo" '$1 == r && !n++ {print $3}')
+  local v std_pins repo sha tag std
+  v=$(verified_pins <<<"$1"); std_pins=$(pins_of "$(cat "$2")") || return 0
+  while IFS=$'\t' read -r repo sha tag; do
+    [ -n "$repo" ] || continue
+    std=$(awk -F'\t' -v r="$repo" '$1 == r && !n++ {print $3}' <<<"$std_pins")
     [ -n "$std" ] && [ "${tag#v}" != "${std#v}" ] && [ "$(printf '%s\n' "${tag#v}" "${std#v}" | sort -V | tail -1)" = "${tag#v}" ] \
       && printf '%s=%s # %s;' "$repo" "$sha" "$tag"
-  done || true # a loop ending on a false test is not a failure
+  done <<<"$v" || true # a loop ending on a false test is not a failure
 }
 label_names() { { grep -oE 'name: ("[^"]+"|[^,}]+)' || true; } | sed -E 's/name: //; s/"//g'; }
 want_labels=$(label_names < "$DIR/standard/labels.yaml")
@@ -131,9 +164,11 @@ if [ "$mode" = apply ]; then
           if [ -n "$cur" ]; then
             have=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -H 'Accept: application/vnd.github.raw')
             # differs only in its refs, each a SHA verified against its version tag: keep the repo's copy
-            pins_ok <<<"$have" && [ "$(awk -v mode=norm -f "$WF" <<<"$have")" = "$(awk -v mode=norm -f "$WF" "$f")" ] && continue
+            if pins_ok <<<"$have"; then ok_pins=true; else ok_pins=false; fi; broken_exit
+            [ "$ok_pins" = true ] && [ "$(awk -v mode=norm -f "$WF" <<<"$have")" = "$(awk -v mode=norm -f "$WF" "$f")" ] && continue
             # never downgrade: carry over the repo's verified pins newer than the standard's
-            new=$(awk -v mode=subst -v reps="$(newer_pins "$have" "$f")" -f "$WF" "$f")
+            reps=$(newer_pins "$have" "$f"); broken_exit
+            new=$(awk -v mode=subst -v reps="$reps" -f "$WF" "$f")
           fi
           gh api -X PUT "repos/$OWNER/$r/contents/$path" -f branch="$branch" -f message="ci: add standard $(basename "$f")" \
             -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
@@ -275,6 +310,7 @@ for r in "${repos[@]}"; do
   while IFS= read -r f; do
     [ -n "$f" ] && hyg+=$(raw "$f" | wf_findings | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
   done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+  broken_exit
   for w in pr-title label-guard todo-issues; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
     # byte-equal, or equal but for refs that are each a SHA verified against its version tag (a Dependabot bump)
