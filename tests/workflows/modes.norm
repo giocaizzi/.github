@@ -1,0 +1,21 @@
+# a compliant workflow; expected: modes.out (empty), modes.pins, modes.norm, modes.subst (Makefile sets reps)
+on:
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@
+      - uses: github/codeql-action/upload-sarif@
+      - uses: ./local
+  reuse:
+    uses: owner/repo/.github/workflows/x.yml@

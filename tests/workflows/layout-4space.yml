@@ -1,0 +1,10 @@
+# a 4-space layout the checker does not read: fails closed; expected: layout-4space.out
+on:
+    pull_request:
+permissions:
+    contents: read
+jobs:
+    a:
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo

@@ -1,0 +1,12 @@
+# `on:` as a block list, a pull_request workflow without concurrency; expected: on-list.out
+on:
+  - push
+  - pull_request
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo

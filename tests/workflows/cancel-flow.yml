@@ -1,0 +1,12 @@
+# a flow-style job concurrency with cancel-in-progress: true on a merge_group workflow; expected: cancel-flow.out
+on:
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency: {group: "${{ github.run_id }}", cancel-in-progress: true}
+    steps:
+      - run: echo

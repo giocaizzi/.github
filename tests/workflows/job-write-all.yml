@@ -1,0 +1,11 @@
+# write-all on a job, the top level read-only; expected: job-write-all.out
+on: push
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: write-all
+    steps:
+      - run: echo

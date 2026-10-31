@@ -38,8 +38,50 @@ repos=("$@")
 [ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
 
-# a workflow with its action refs blanked (`uses: x@<sha> # vN` -> `uses: x@`), to compare across Dependabot bumps
-norm_uses() { sed -E 's/^([[:space:]]*(- )?uses:[[:space:]]*[^@[:space:]]+)@.*$/\1@/'; }
+# Workflow hygiene (scripts/workflow.awk; rules in docs/standard.md, CI hygiene).
+WF=$DIR/scripts/workflow.awk
+pin_cache=$(mktemp); trap 'rm -f "$pin_cache"' EXIT # `<owner/repo> <tag> <commit>` per tag looked up this run
+# the commit tag $2 of $1 points to (annotated tags dereferenced), `-` when it cannot be read
+tag_commit() {
+  local hit type sha
+  hit=$(awk -v r="$1" -v t="$2" '$1 == r && $2 == t {print $3; exit}' "$pin_cache")
+  [ -n "$hit" ] && { echo "$hit"; return; }
+  read -r type sha < <(gh api "repos/$1/git/ref/tags/$2" -q '"\(.object.type) \(.object.sha)"' </dev/null 2>/dev/null || echo "- -")
+  for _ in 1 2 3; do # tag objects can point to tags
+    [ "$type" = tag ] || break
+    read -r type sha < <(gh api "repos/$1/git/tags/$sha" -q '"\(.object.type) \(.object.sha)"' </dev/null 2>/dev/null || echo "- -")
+  done
+  [ "$type" = commit ] || sha=-
+  echo "$1 $2 $sha" >> "$pin_cache"; echo "$sha"
+}
+# the pins of the workflow on stdin that match their version tag upstream, `<owner/repo>\t<sha>\t<version>`
+verified_pins() {
+  local repo sha tag
+  awk -v mode=pins -f "$WF" | while IFS=$'\t' read -r repo sha tag; do
+    [ "$(tag_commit "$repo" "$tag")" = "$sha" ] && printf '%s\t%s\t%s\n' "$repo" "$sha" "$tag"
+  done || true # a loop ending on a false test is not a failure
+}
+# hygiene findings of the workflow on stdin, `<id>\t<detail>`: workflow.awk, plus each pin checked upstream
+wf_findings() {
+  local c repo sha tag got
+  c=$(cat)
+  awk -f "$WF" <<<"$c" || printf 'wf_parsed\tworkflow.awk failed\n' # fail closed
+  awk -v mode=pins -f "$WF" <<<"$c" | while IFS=$'\t' read -r repo sha tag; do
+    got=$(tag_commit "$repo" "$tag")
+    [ "$got" = "$sha" ] || printf 'wf_pinned\t%s@%s is not %s upstream (%s)\n' "$repo" "$sha" "$tag" "$([ "$got" = - ] && echo "tag not found" || echo "tag is $got")"
+  done || true
+}
+# true when the workflow on stdin has no unparsed line and every pin is a verified SHA with its version
+pins_ok() { local f; f=$(wf_findings); ! grep -qE '^(wf_parsed|wf_pinned)' <<<"$f"; } # no pipe: grep -q + pipefail would fail open
+# `owner/repo=<sha> # <version>;...` for the verified pins in workflow $1 (content) newer than those in file $2
+newer_pins() {
+  local repo sha tag std
+  verified_pins <<<"$1" | while IFS=$'\t' read -r repo sha tag; do
+    std=$(awk -v mode=pins -f "$WF" "$2" | awk -F'\t' -v r="$repo" '$1 == r && !n++ {print $3}')
+    [ -n "$std" ] && [ "${tag#v}" != "${std#v}" ] && [ "$(printf '%s\n' "${tag#v}" "${std#v}" | sort -V | tail -1)" = "${tag#v}" ] \
+      && printf '%s=%s # %s;' "$repo" "$sha" "$tag"
+  done || true # a loop ending on a false test is not a failure
+}
 label_names() { { grep -oE 'name: ("[^"]+"|[^,}]+)' || true; } | sed -E 's/name: //; s/"//g'; }
 want_labels=$(label_names < "$DIR/standard/labels.yaml")
 # create or update the labels.yaml lines on stdin in repo $r; `extra` skips a name the standard defines
@@ -85,10 +127,16 @@ if [ "$mode" = apply ]; then
           path=.github/workflows/$(basename "$f")
           cur=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -q .sha 2>/dev/null || true)
           [ "$cur" = "$(git hash-object "$f")" ] && continue
-          # keep a repo's own newer action pins: skip a file that differs only in its `uses:` refs
-          [ -n "$cur" ] && [ "$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -H 'Accept: application/vnd.github.raw' | norm_uses)" = "$(norm_uses < "$f")" ] && continue
+          new=$(cat "$f")
+          if [ -n "$cur" ]; then
+            have=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -H 'Accept: application/vnd.github.raw')
+            # differs only in its refs, each a SHA verified against its version tag: keep the repo's copy
+            pins_ok <<<"$have" && [ "$(awk -v mode=norm -f "$WF" <<<"$have")" = "$(awk -v mode=norm -f "$WF" "$f")" ] && continue
+            # never downgrade: carry over the repo's verified pins newer than the standard's
+            new=$(awk -v mode=subst -v reps="$(newer_pins "$have" "$f")" -f "$WF" "$f")
+          fi
           gh api -X PUT "repos/$OWNER/$r/contents/$path" -f branch="$branch" -f message="ci: add standard $(basename "$f")" \
-            -f content="$(base64 < "$f" | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
+            -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${cur:+-f sha="$cur"} >/dev/null
           changed=1
         done
         if [ $changed = 1 ]; then
@@ -222,21 +270,22 @@ for r in "${repos[@]}"; do
   else chk ci_check_job standard "$(ok job_ok)" "check job lacks needs + if: always()"; fi
   chk make_check standard "$(ok grep -qE '^check:' <<<"$mk")" "Makefile has no check target"
   chk gitleaks standard "$(ok grep -q gitleaks <<<"$ci")" "ci.yml does not run gitleaks"
+  # CI hygiene of every workflow: one check per rule, each detail prefixed by its file
+  hyg="" tab=$'\t'
+  while IFS= read -r f; do
+    [ -n "$f" ] && hyg+=$(raw "$f" | wf_findings | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
+  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
   for w in pr-title label-guard todo-issues; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
-    # equal, or equal but for the action refs Dependabot bumps (wf_pinned checks those)
+    # byte-equal, or equal but for refs that are each a SHA verified against its version tag (a Dependabot bump)
     same=$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")
-    [ "$same" = false ] && [ -n "$got" ] && same=$(ok test "$(raw ".github/workflows/$w.yml" | norm_uses)" = "$(norm_uses < "$DIR/standard/workflows/$w.yml")")
+    [ "$same" = false ] && [ -n "$got" ] && ! grep -qE "^(wf_parsed|wf_pinned)$tab$w\.yml: " <<<"$hyg" &&
+      same=$(ok test "$(raw ".github/workflows/$w.yml" | awk -v mode=norm -f "$WF")" = "$(awk -v mode=norm -f "$WF" "$DIR/standard/workflows/$w.yml")")
     chk "${w/-/_}" standard "$same" "workflow drift: $w.yml"
   done
   # todo-issues pushes run on main or master only (its `branches:`)
   chk todo_issues_branch standard "$(ok grep -qxE 'main|master' <<<"$base")" "default branch $base: todo-issues triggers on main or master only"
-  # CI hygiene of every workflow (scripts/workflow.awk): one check per rule, each detail prefixed by its file
-  hyg="" tab=$'\t'
-  while IFS= read -r f; do
-    [ -n "$f" ] && hyg+=$(raw "$f" | awk -f "$DIR/scripts/workflow.awk" | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
-  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
-  for c in wf_permissions wf_timeout wf_concurrency wf_pinned; do
+  for c in wf_parsed wf_permissions wf_timeout wf_concurrency wf_pinned; do
     d=$(awk -F'\t' -v c="$c" '$1==c{print $2}' <<<"$hyg" | paste -sd';' - | sed 's/;/; /g')
     chk "$c" standard "$(ok test -z "$d")" "$d"
   done
