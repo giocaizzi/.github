@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Audit or apply ../standard. Usage: sync.sh audit [--json] [--visibility public|private|all] [repo ...] | sync.sh apply <settings|labels|workflows|gitignore|claude-md|todos|ruleset> [repo ...] | sync.sh onboard <repo> <type> [flag,...]
-# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope or a broken run (API error other than 404, checker crash). `--json` prints a JSON array on stdout and the text report on stderr.
+# `audit` is read-only; exit 0 ok, 1 drift, 2 empty scope or a broken run (API error other than 404, failed fetch, checker crash). `--json` prints a JSON array on stdout and the text report on stderr.
 # Default scope: every non-fork, non-archived repo of the owner, filtered by --visibility (default all).
 # Repo type and flags come from the repo's GitHub topics (std-<type>, std-<flag>; parser: scripts/meta.jq).
 # `ruleset` requires a green `check` job first (see docs/runbook-rollout.md): it blocks merges otherwise.
@@ -38,11 +38,11 @@ repos=("$@")
 [ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
 
-# Workflow hygiene (scripts/workflow.awk; rules in docs/standard.md, CI hygiene).
+# Workflow hygiene (scripts/workflow.py checks, scripts/workflow.awk text modes; rules in docs/standard.md, CI hygiene).
 WF=$DIR/scripts/workflow.awk
 pin_cache=$(mktemp) broken=$(mktemp) # `<owner/repo> <tag> <commit>` per tag looked up this run; what broke the run
 trap 'rm -f "$pin_cache" "$broken" "$broken.last"' EXIT
-# A failure that is not drift (a GitHub API error other than 404, a crash of workflow.awk) is recorded in $broken;
+# A failure that is not drift (a GitHub API error other than 404, a failed fetch, a crash of the checker) is recorded in $broken;
 # broken_exit stops the run with exit 2 (the audit itself broke), so it never reaches the drift issue.
 broken_exit() {
   [ -s "$broken" ] || return 0
@@ -71,46 +71,55 @@ tag_commit() {
   [ "$type" = commit ] || sha=-
   echo "$1 $2 $sha" >> "$pin_cache"; echo "$sha"
 }
-# the pins (`<owner/repo>\t<sha>\t<version>`) of workflow content $1; a crash of workflow.awk is recorded, not hidden
-pins_of() {
-  local p
-  p=$(awk -v mode=pins -f "$WF" <<<"$1") || { echo "workflow.awk -v mode=pins failed" >> "$broken"; return 1; }
-  [ -z "$p" ] || printf '%s\n' "$p"
+# The checker: scripts/workflow.py on the pinned YAML parser (its lock file pins the hashes). A non-zero exit is a
+# crash, recorded in $broken; it never passes a file. Text modes (norm, subst) are scripts/workflow.awk.
+wf_check() { uv run --quiet --script --locked "$DIR/scripts/workflow.py"; }
+# the checker's output for the workflow or action.yml on stdin; after a crash, a wf_parsed finding (so nothing
+# passes) and a record in $broken (so the run exits 2)
+wf_out() {
+  local out
+  out=$(wf_check) || { echo "scripts/workflow.py failed (exit $?)" >> "$broken"; printf 'wf_parsed\tscripts/workflow.py failed\n'; return 0; }
+  [ -z "$out" ] || printf '%s\n' "$out"
 }
-# the pins of the workflow on stdin that match their version tag upstream
-verified_pins() {
-  local p repo sha tag
-  p=$(pins_of "$(cat)") || return 0
-  while IFS=$'\t' read -r repo sha tag; do
-    [ -n "$repo" ] && [ "$(tag_commit "$repo" "$tag")" = "$sha" ] && printf '%s\t%s\t%s\n' "$repo" "$sha" "$tag"
-  done <<<"$p" || true # a loop ending on a false test is not a failure; no pipe, so nothing else is hidden
-}
-# hygiene findings of the workflow on stdin, `<id>\t<detail>`: workflow.awk, plus each pin checked upstream
+# hygiene findings of the workflow or action.yml on stdin, `<id>\t<detail>`: the checker's, each pin checked
+# upstream, and each `./` ref found in the repo's file list $1 (an action.yml there, or a workflow file)
 wf_findings() {
-  local c p repo sha tag got
-  c=$(cat)
-  awk -f "$WF" <<<"$c" || printf 'wf_parsed\tworkflow.awk failed\n' # fail closed
-  p=$(pins_of "$c") || { printf 'wf_parsed\tworkflow.awk -v mode=pins failed\n'; return 0; }
-  while IFS=$'\t' read -r repo sha tag; do
-    [ -n "$repo" ] || continue
-    got=$(tag_commit "$repo" "$tag")
-    case $got in
-      "$sha") ;;
-      !) ;; # recorded in $broken: the run exits 2
-      -) printf 'wf_pinned\t%s@%s: tag %s not found upstream\n' "$repo" "$sha" "$tag" ;;
-      *) printf 'wf_pinned\t%s@%s is not %s upstream (tag is %s)\n' "$repo" "$sha" "$tag" "$got" ;;
+  local out kind a b c got
+  out=$(wf_out)
+  grep -E '^wf_' <<<"$out" || true
+  while IFS=$'\t' read -r kind a b c; do
+    case $kind in
+      pin)
+        got=$(tag_commit "$a" "$c")
+        case $got in
+          "$b"|!) ;; # verified, or recorded in $broken (the run exits 2)
+          -) printf 'wf_pinned\t%s@%s: tag %s not found upstream\n' "$a" "$b" "$c" ;;
+          *) printf 'wf_pinned\t%s@%s is not %s upstream (tag is %s)\n' "$a" "$b" "$c" "$got" ;;
+        esac ;;
+      local)
+        b=${a#./}; b=${b%/}
+        awk -v p="$b" '$0 == p || $0 == p "/action.yml" || $0 == p "/action.yaml" {f = 1} END {exit !f}' <<<"${1:-}" \
+          || printf 'wf_pinned\tlocal ref %s: no action.yml or workflow at that path in the repo\n' "$a" ;;
     esac
-  done <<<"$p"
+  done <<<"$out"
 }
-# true when the workflow on stdin has no unparsed line and every pin is a verified SHA with its version
-pins_ok() { local f; f=$(wf_findings); ! grep -qE '^(wf_parsed|wf_pinned)' <<<"$f"; } # no pipe: grep -q + pipefail would fail open
+# true when the workflow on stdin has no finding that touches its refs: every pin verified, nothing unparsed
+pins_ok() { local f; f=$(wf_findings ""); ! grep -qE '^(wf_parsed|wf_pinned)' <<<"$f"; } # no pipe: grep -q + pipefail would fail open
+# the pins of the workflow on stdin that match their version tag upstream, `<owner/repo>\t<sha>\t<version>`
+verified_pins() {
+  local out kind repo sha tag
+  out=$(wf_out)
+  while IFS=$'\t' read -r kind repo sha tag; do
+    [ "$kind" = pin ] && [ "$(tag_commit "$repo" "$tag")" = "$sha" ] && printf '%s\t%s\t%s\n' "$repo" "$sha" "$tag"
+  done <<<"$out" || true # a loop ending on a false test is not a failure; no pipe, so nothing else is hidden
+}
 # `owner/repo=<sha> # <version>;...` for the verified pins in workflow $1 (content) newer than those in file $2
 newer_pins() {
   local v std_pins repo sha tag std
-  v=$(verified_pins <<<"$1"); std_pins=$(pins_of "$(cat "$2")") || return 0
+  v=$(verified_pins <<<"$1"); std_pins=$(wf_out < "$2")
   while IFS=$'\t' read -r repo sha tag; do
     [ -n "$repo" ] || continue
-    std=$(awk -F'\t' -v r="$repo" '$1 == r && !n++ {print $3}' <<<"$std_pins")
+    std=$(awk -F'\t' -v r="$repo" '$1 == "pin" && $2 == r && !n++ {print $4}' <<<"$std_pins")
     [ -n "$std" ] && [ "${tag#v}" != "${std#v}" ] && [ "$(printf '%s\n' "${tag#v}" "${std#v}" | sort -V | tail -1)" = "${tag#v}" ] \
       && printf '%s=%s # %s;' "$repo" "$sha" "$tag"
   done <<<"$v" || true # a loop ending on a false test is not a failure
@@ -244,6 +253,11 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
   raw() { if has "${1//./\\.}"; then gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' || true; fi; }
+  # a file the hygiene checks read: a failed fetch is a broken run (recorded), never empty input read as drift
+  fetch() {
+    gh api "repos/$OWNER/$r/contents/$1?ref=$base" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
+      || echo "gh api contents/$1 ($r): $(head -1 "$broken.last")" >> "$broken"
+  }
   excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
   agent_ignore_missing() { grep -vxF -f <(raw .gitignore) <(grep -v '^#' "$DIR/standard/gitignore-agents") || true; }
@@ -305,20 +319,21 @@ for r in "${repos[@]}"; do
   else chk ci_check_job standard "$(ok job_ok)" "check job lacks needs + if: always()"; fi
   chk make_check standard "$(ok grep -qE '^check:' <<<"$mk")" "Makefile has no check target"
   chk gitleaks standard "$(ok grep -q gitleaks <<<"$ci")" "ci.yml does not run gitleaks"
-  # CI hygiene of every workflow: one check per rule, each detail prefixed by its file
+  # CI hygiene of every workflow and every action.yml (local actions): one check per rule, details prefixed by file
   hyg="" tab=$'\t'
   while IFS= read -r f; do
-    [ -n "$f" ] && hyg+=$(raw "$f" | wf_findings | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
-  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+    [ -n "$f" ] && hyg+=$(fetch "$f" | wf_findings "$paths" | sed "s|$tab|$tab${f#.github/workflows/}: |")$'\n'
+  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$|^(.*/)?action\.ya?ml$' <<<"$paths")
   broken_exit
   for w in pr-title label-guard todo-issues; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
     # byte-equal, or equal but for refs that are each a SHA verified against its version tag (a Dependabot bump)
     same=$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")
     [ "$same" = false ] && [ -n "$got" ] && ! grep -qE "^(wf_parsed|wf_pinned)$tab$w\.yml: " <<<"$hyg" &&
-      same=$(ok test "$(raw ".github/workflows/$w.yml" | awk -v mode=norm -f "$WF")" = "$(awk -v mode=norm -f "$WF" "$DIR/standard/workflows/$w.yml")")
+      same=$(ok test "$(fetch ".github/workflows/$w.yml" | awk -v mode=norm -f "$WF")" = "$(awk -v mode=norm -f "$WF" "$DIR/standard/workflows/$w.yml")")
     chk "${w/-/_}" standard "$same" "workflow drift: $w.yml"
   done
+  broken_exit
   # todo-issues pushes run on main or master only (its `branches:`)
   chk todo_issues_branch standard "$(ok grep -qxE 'main|master' <<<"$base")" "default branch $base: todo-issues triggers on main or master only"
   for c in wf_parsed wf_permissions wf_timeout wf_concurrency wf_pinned; do
