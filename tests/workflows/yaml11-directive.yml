@@ -1,0 +1,15 @@
+%YAML 1.1
+---
+# a YAML 1.1 directive changes how `yes` and `on` resolve: not read; expected: yaml11-directive.out
+on: push
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.run_id }}
+  cancel-in-progress: yes
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo

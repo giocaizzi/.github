@@ -53,3 +53,18 @@ jobs:
     timeout-minutes: ${{ inputs.minutes }}
     steps:
       - run: echo
+  hexconst:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 0x0 }}
+    steps:
+      - run: echo
+  expconst:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 1e3 }}
+    steps:
+      - run: echo
+  ctxinstring:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 'inputs.minutes' }}
+    steps:
+      - run: echo

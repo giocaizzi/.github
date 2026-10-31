@@ -1,0 +1,40 @@
+# on push, a group keeps runs apart only when github.run_id is an expression's value; expected: run-id-forms.out
+on: push
+permissions:
+  contents: read
+jobs:
+  inastring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "ci-${{ 'github.run_id' }}"
+    steps:
+      - run: echo
+  refor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.ref || github.run_id }}"
+    steps:
+      - run: echo
+  documented:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}"
+    steps:
+      - run: echo
+  bare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "ci-${{ github.run_id }}"
+    steps:
+      - run: echo
+  spaced:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{  github.run_id  }}-x"
+    steps:
+      - run: echo

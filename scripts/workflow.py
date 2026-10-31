@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
-from ruamel.yaml.events import CollectionStartEvent, ScalarEvent
+from ruamel.yaml.events import CollectionStartEvent, DocumentStartEvent, ScalarEvent
 from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 STR = "tag:yaml.org,2002:str"
@@ -39,12 +39,22 @@ NULL = "tag:yaml.org,2002:null"
 MERGE = "tag:yaml.org,2002:merge"
 # Line breaks other than LF, left after CRLF is folded: YAML parsers disagree on them, so they fail closed.
 BREAKS = {"\r": "CR", "\x85": "NEL", "\u2028": "LS", "\u2029": "PS"}
-REMOTE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+(/[^@\s]+)?@[0-9a-f]{40}")
+REMOTE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+(/[^@\s\\]+)?@[0-9a-f]{40}")  # no `\`: a path separator on Windows
 DOCKER = re.compile(r"docker://[^@\s]+@sha256:[0-9a-f]{64}")
-LOCAL = re.compile(r"\./[^\s]*")
+LOCAL = re.compile(r"\./[^\s\x00-\x1f\x7f\\]*")
 VERSION = re.compile(r"\s+#\s*(v?[0-9]+(?:\.[0-9]+)*)\s*")
 EXPR = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
-RUN_ID = re.compile(r"\$\{\{[^}]*\bgithub\.run_id\b[^}]*\}\}")
+# A group keeps push, merge_group and reusable runs apart only when github.run_id is the value of one of its
+# expressions: `${{ github.run_id }}`, or the documented
+# `${{ github.event_name == 'pull_request' && <ctx> || github.run_id }}`. `github.ref || github.run_id` (the ref is
+# always set) or `'github.run_id'` (a string) do not count.
+EXPRESSIONS = re.compile(r"\$\{\{([^}]*)\}\}")
+RUN_ID_VALUES = (
+    re.compile(r"github\.run_id"),
+    re.compile(
+        r"github\.event_name\s*==\s*'pull_request(_target)?'\s*&&\s*[A-Za-z_][A-Za-z0-9_.-]*\s*\|\|\s*github\.run_id"
+    ),
+)
 LEVELS = {"read", "write", "none"}
 PR_EVENTS = {"pull_request", "pull_request_target"}
 # their runs are never cancelled or replaced; a reusable workflow (workflow_call) runs in its caller's context, whose
@@ -52,7 +62,8 @@ PR_EVENTS = {"pull_request", "pull_request_target"}
 GUARDED_EVENTS = {"push", "merge_group", "workflow_call"}
 MINUTES = re.compile(r"[1-9][0-9]*")  # plain decimal: YAML 1.2 core reads `1_0`, `0b101`, `0x_1` as strings
 ONE_EXPR = re.compile(r"\$\{\{([^}]*)\}\}")
-CONSTANT = re.compile(r"-?[0-9.]+|'[^']*'|true|false|null")
+# an expression that reads no context is a constant (numbers in any form: hex, exponent, ...; strings; literals)
+CONTEXT = re.compile(r"\b(github|env|vars|inputs|matrix|needs|strategy|steps|job|jobs|runner|secrets)\b")
 IMAGE = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
 
 
@@ -125,7 +136,10 @@ class Checker:
 
     def bad(self, check: str, detail: str) -> None:
         """Record a failed rule."""
-        self.findings.setdefault(check, []).append(detail)
+        # names from the file (job keys, refs) may hold control characters: escape them, one finding per line
+        self.findings.setdefault(check, []).append(
+            re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", detail)
+        )
 
     def ref(self, node: Node, where: str) -> None:
         """Check one `uses` (or docker `image`) ref and its version comment."""
@@ -142,6 +156,9 @@ class Checker:
         if value.startswith("docker://"):
             if not DOCKER.fullmatch(value):
                 self.bad("wf_pinned", f"docker image not pinned by sha256 digest: {value}")
+            return
+        if "\\" in value:  # a path separator on Windows runners
+            self.bad("wf_pinned", f"`\\` in a remote ref: {value}")
             return
         if not REMOTE.fullmatch(value):
             self.bad("wf_pinned", f"not pinned by SHA: {value}")
@@ -185,7 +202,8 @@ class Checker:
             raise UnreadableError(msg)
         if not guarded:
             return
-        if not RUN_ID.search(text(group) or ""):
+        values = [" ".join(e.split()) for e in EXPRESSIONS.findall(text(group) or "")]
+        if not any(pattern.fullmatch(v) for v in values for pattern in RUN_ID_VALUES):
             self.bad(
                 "wf_concurrency",
                 f"{where}: group without ${{{{ github.run_id }}}} on a push, merge_group or workflow_call run",
@@ -287,7 +305,10 @@ def positive_minutes(node: Node | None) -> bool:
     if tag(node) == INT:
         return bool(MINUTES.fullmatch(str(node.value)))
     match = ONE_EXPR.fullmatch(text(node) or "")
-    return match is not None and not CONSTANT.fullmatch(match.group(1).strip())
+    if match is None:
+        return False
+    body = re.sub(r"'([^']|'')*'", "", match.group(1))  # a context name inside a string literal does not count
+    return bool(CONTEXT.search(body))
 
 
 def check_mappings(node: Node, seen: set[int]) -> None:
@@ -308,6 +329,9 @@ def check_mappings(node: Node, seen: set[int]) -> None:
 def check_tags(yaml: YAML, source: str) -> None:
     """Reject explicit tags (`!!bool`, `!x`): GitHub's parser may resolve them differently."""
     for event in yaml.parse(source):
+        if isinstance(event, DocumentStartEvent) and (event.version is not None or event.tags):
+            msg = f"line {event.start_mark.line + 1}: YAML directive (%YAML or %TAG); only plain YAML 1.2 is read"
+            raise UnreadableError(msg)
         if isinstance(event, ScalarEvent | CollectionStartEvent) and event.tag is not None:
             msg = f"line {event.start_mark.line + 1}: explicit tag {event.tag}"
             raise UnreadableError(msg)
