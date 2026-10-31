@@ -7,7 +7,7 @@ Prereqs: `gh` authenticated with `repo` + `administration` scope, `jq`, `shellch
 make audit                      # all in-scope repos (VISIBILITY=public|private to narrow)
 scripts/sync.sh audit greenhouse # one repo
 ```
-Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope. Output lists each failing check as `id: detail`.
+Exit code 0 ok, 1 when any repo drifts (a failing standard or typed check), 2 when no repo is in scope or the audit itself broke (a GitHub API error other than 404 while checking pins, or a crash of `scripts/workflow.awk`; the cause is printed). Output lists each failing check as `id: detail`.
 
 JSON for the dashboard:
 ```bash

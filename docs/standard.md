@@ -53,7 +53,13 @@ Every repo runs `standard/workflows/todo-issues.yml` (`alstr/todo-to-issue-actio
   - Released: `release-please-config.json` with `"release-type": "go"` (tags `v*`, as Go module versions need).
 
 ## CI hygiene
-Every workflow in `.github/workflows/`, the standard's own included; `scripts/workflow.awk` checks each file (see [Audit](#audit)). The checker fails closed: it reads the block-style, 2-space layout GitHub's examples use (triggers and jobs at 2, job keys at 4), and anything else (flow-style `on:`, `jobs:` or a job, another indent, YAML aliases or merge keys, a `uses`, `permissions` or `concurrency` key it cannot place) fails `wf_parsed` instead of passing.
+Every workflow in `.github/workflows/`, the standard's own included; `scripts/workflow.awk` checks each file (see [Audit](#audit)). The checker reads lines, not a YAML tree: it reads the block-style, 2-space layout GitHub's examples use (triggers and jobs at 2, job keys at 4) and fails `wf_parsed` on what it does not read, instead of passing:
+  - flow-style `on:`, `jobs:` or a job, another indent, tab indentation;
+  - YAML aliases, merge keys, tags (`!!bool`), explicit keys (`? k` / `: v`), directives, an anchor, tag or alias on a key, an escape in a quoted key;
+  - a quoted or flow value that does not close on its own line (a continuation line could fake a key or open a block scalar);
+  - a `uses`, `permissions`, `concurrency` or `timeout-minutes` key anywhere on a line other than as that line's own parsed key (inside a flow value, after a tag, ...).
+
+  A block scalar (`run: |`) is skipped only when it is the whole value of a plain key. Each rule has a fixture in `tests/workflows/`. This is a fail-closed subset, not a proof: a valid YAML form outside these rules could still hide a key.
 - **Timeouts**: every job sets `timeout-minutes` (a job that calls a reusable workflow cannot; the called workflow's jobs set it). A job that runs out fails, so a required check turns red, never skipped.
 - **Permissions**: top-level `permissions:` with the least the workflow needs (`contents: read` unless it needs more), widened per job where one job needs more; never `write-all`, at the top level or on a job.
 - **Concurrency**: a workflow that runs on `pull_request` sets `concurrency:`, one group per event, and cancels in progress only for `pull_request` (a superseded run on the same PR; the run for the new head still reports every check). `merge_group` runs and default-branch pushes are never cancelled. A group with `cancel-in-progress: false` still replaces a pending run, so those runs get a group of their own (`github.run_id`):
@@ -65,7 +71,12 @@ Every workflow in `.github/workflows/`, the standard's own included; `scripts/wo
   ```
   In a workflow that also runs on `push` or `merge_group`, every concurrency group (top level or job) must name `github.run_id`, and a literal true `cancel-in-progress` (`true`, `True`, `${{ true }}`, block or flow style) fails the audit. That a group gives each such run its own value is not proven, only that it names `github.run_id`: copy the block above.
 - **Merge queue**: where a repo has one, every workflow that reports a required check also triggers on `merge_group`. User-owned repos have none (see [Ruleset](#ruleset-standardruleset-mainjson)); `pr-title.yml` carries the trigger already.
-- **Pinned actions**: every `uses:` names a full commit SHA with its version tag as a comment (`actions/checkout@<sha> # v7.0.1`); local (`./`) and `docker://` refs are exempt. The audit resolves each tag upstream (`git/ref/tags/<tag>`, annotated tags dereferenced) and fails a SHA that is not the commit the tag points to, so a made-up, forked or mislabelled SHA does not pass. Known limit: an older release pinned correctly passes; Dependabot (`github-actions`, plus security updates) moves it forward. Dependabot bumps the SHA and the comment.
+- **Pinned actions**: every `uses:` names a full commit SHA with its version tag as a comment (`actions/checkout@<sha> # v7.0.1`); local (`./`) and `docker://` refs are exempt. The audit resolves each tag upstream (`git/ref/tags/<tag>`, annotated tags dereferenced) and fails a SHA that is not the commit the tag points to, so a made-up, forked or mislabelled SHA does not pass. Dependabot bumps the SHA and the comment.
+  - Known limits:
+    - An older release pinned correctly passes; Dependabot (`github-actions`, plus security updates) moves it forward.
+    - Verification trusts where the tag points today: if upstream moves a tag (a retag or a compromise), its new commit passes, and the old, correct pin fails, which is drift, not a pass.
+    - A major-tag comment (`# v7`) passes only until the next `v7.x` moves that tag.
+  - Only an HTTP 404 counts as "tag not found". Any other API failure (token, 403, rate limit, 5xx), or a crash of the checker, stops the audit with exit 2 (the audit broke) and prints the cause, so it never reaches the drift issue.
   - The standard workflows here are pinned too. A repo's copy matches the standard when it is byte-equal, or equal but for refs that each pass that check, so a Dependabot bump in the repo is not drift; an unpinned or unverified ref is drift.
   - `sync.sh apply workflows` leaves such a copy alone, replaces any other (an unpinned one included), and when it replaces a copy it keeps the repo's verified pins that are newer than the standard's: it never downgrades a pin.
   - Dependabot here bumps `.github/workflows/` only, not `standard/workflows/`; `make test` fails until the same bump is copied there (`cp .github/workflows/{pr-title,label-guard,todo-issues}.yml standard/workflows/`), so the two stay equal.
