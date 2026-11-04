@@ -28,7 +28,48 @@ Who wrote a change must survive the squash, so attribution lives in the PR descr
 Default-branch rules: PR required (squash), up-to-date branch, required status checks `check` and `Validate PR title` (a minimum: a repo may require more, e.g. a leak check; the audit and `sync.sh apply ruleset` keep them), no deletion or force-push. `check` is one aggregate CI job (`needs: [...]`, `if: always()`) so job renames never touch the ruleset. No merge queue on user-owned repos (not offered); strict up-to-date checks plus auto-merge replace it.
 
 ## Repo settings (`standard/repo-settings.json`)
-Squash only, auto-merge, delete-branch-on-merge, secret scanning and push protection, private vulnerability reporting (the last four on public repos only). Dependabot alerts and Dependabot security updates on every repo (free on private repos too; `sync.sh apply settings` enables them through their own endpoints, not `repo-settings.json`). Dependabot updates configured per repo (`.github/dependabot.yml`: ecosystem + `github-actions`), always grouped, never one PR per dependency: every `updates` entry has `groups`. `github-actions` and `docker`: one group, `patterns: ["*"]`. Language ecosystems (uv, pip, npm, gomod, ...): `minor-patch` (`update-types: [minor, patch]`), `major` (`update-types: [major]`) and `security` (`applies-to: security-updates`, `patterns: ["*"]`). Every `updates` entry sets `commit-message.prefix` so Dependabot PR titles pass the `Validate PR title` check: `ci(deps)` for `github-actions`, `chore(deps)` for every other ecosystem (no `include: scope`). Dependabot lowercases `bump` after a lowercase prefix unless the latest Dependabot commit on the default branch starts `type: Bump`; then it copies that capital, and the title of such a PR is edited to lowercase before merging.
+Squash only, auto-merge, delete-branch-on-merge, secret scanning and push protection, private vulnerability reporting (the last four on public repos only). Dependabot alerts and Dependabot security updates on every repo (free on private repos too; `sync.sh apply settings` enables them through their own endpoints, not `repo-settings.json`). Dependabot version updates: [Dependabot updates](#dependabot-updates).
+
+## Dependabot updates
+Every repo has `.github/dependabot.yml`: `github-actions` plus each package ecosystem it uses. Every update PR pays a full PR run and a push run after it merges, so updates are batched twice, in time (one weekly run, a cap on open update PRs) and by grouping (one PR per group, never one per dependency): a week's bumps cost one or two PRs' CI per ecosystem.
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]
+  - package-ecosystem: uv # or pip, npm, gomod, ...
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      minor-patch:
+        update-types: [minor, patch]
+      major:
+        update-types: [major]
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+```
+
+- **Schedule**: `schedule.interval: weekly` on every entry (Monday by default, so every entry runs the same day).
+- **Cap**: `open-pull-requests-limit` on every entry, set to its number of version-update groups: `1` for `github-actions` and `docker` (one group), `2` for a language ecosystem (`minor-patch` and `major`). The default is 5. Never `0`: that turns the entry's version updates off.
+- **Groups**, on every entry: `github-actions` and `docker` have one group, `patterns: ["*"]`. A language ecosystem (uv, pip, npm, gomod, ...) has `minor-patch` (`update-types: [minor, patch]`: every minor and patch bump in one PR), `major` (`update-types: [major]`: breaking bumps in a PR of their own, reviewed apart from the routine batch) and `security`. A dependency that matches no group gets a PR of its own, which is what the groups exist to prevent.
+- **Security updates are never held back**: they come from Dependabot security updates (a repo setting, see [Repo settings](#repo-settings-standardrepo-settingsjson)), which Dependabot raises as advisories appear, outside the schedule, without the version-update cooldown and outside `open-pull-requests-limit` (they have their own fixed cap of 10 open PRs). The `security` group (`applies-to: security-updates`) only puts the fixes for one ecosystem that are open at the same time into one PR; it never delays one. Groups without `applies-to` cover version updates only. Nothing in the file turns security updates off.
+- **Commit messages**: every entry sets `commit-message.prefix` so Dependabot PR titles pass the `Validate PR title` check: `ci(deps)` for `github-actions`, `chore(deps)` for every other ecosystem (no `include: scope`). Dependabot lowercases `bump` after a lowercase prefix unless the latest Dependabot commit on the default branch starts `type: Bump`; then it copies that capital, and the title of such a PR is edited to lowercase before merging.
+- **Labels**: no `labels:` key, which would replace Dependabot's default labels: `dependencies` plus the ecosystem's own (`github_actions`, `python:uv`, `javascript`, ...), all in `standard/labels.yaml`. An ecosystem whose default label is not there gets it added to `standard/labels.yaml` first; otherwise the `label-guard` workflow deletes it.
+- **Audited**: `dependabot` (the file exists), `dependabot_grouped` (every entry has a version-update group: an entry with no `groups`, an empty one, or only `applies-to: security-updates` groups is drift; the `security` group is neither required nor counted) and `dependabot_prefix`. The schedule, the cap and the labels are documented, not audited.
 
 ## Labels (`standard/labels.yaml`)
 Type (bug, enhancement, documentation, question, wontfix, invalid, duplicate), priority P1–P3, `parity`, and the automation labels Dependabot, release-please and the `todo-issues` workflow create. A repo may declare its own extra labels in `.github/labels.yaml` (same format, optional; this repo's holds `drift`); an extra that reuses a standard name is ignored and fails the audit. No other label may exist: `sync.sh apply labels` creates the standard and the repo's extras and deletes the rest, and the `label-guard` workflow (`standard/workflows/label-guard.yml`) deletes any other label as soon as it is created or renamed. A label every repo needs goes in `standard/labels.yaml` here; one only a repo needs goes in that repo's `.github/labels.yaml`. GitHub cannot block label creation natively.
@@ -174,7 +215,7 @@ Each repo carries its metadata as GitHub topics, so no list of repos lives here:
 
 ## Audit
 `scripts/sync.sh audit` reports three kinds of checks; standard and typed failures are drift (exit 1), extras never are.
-- **Standard** (every repo): exactly one `std-<type>` topic (`repo_type`); `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title`, `label-guard` and `todo-issues` workflows (byte-equal, or equal but for verified `uses:` refs; the comparison blanks refs with `scripts/workflow.awk -v mode=norm`) and a `main` or `master` default branch (`todo_issues_branch`); the [CI hygiene](#ci-hygiene) rules on every workflow and `action.yml` (`wf_parsed`, `wf_permissions`, `wf_timeout`, `wf_concurrency`, `wf_pinned`, the last with each pin resolved upstream and each `./` ref found in the repo); Dependabot with grouped updates and a Conventional Commit `commit-message.prefix` on every entry; `AGENTS.md` and no tracked `CLAUDE.md` (`no_claude_md`; `sync.sh apply claude-md` opens a PR deleting the ones that are symlinks to `AGENTS.md`); the agent-config lines in `.gitignore` (`agent_ignore`); squash-only, delete-branch; no poetry; labels (standard plus the repo's `.github/labels.yaml`, no other, no extra redefining a standard one); `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
+- **Standard** (every repo): exactly one `std-<type>` topic (`repo_type`); `ci.yml` job `check` with `needs` + `if: always()`; Makefile `check` target; gitleaks in `ci.yml`; standard `pr-title`, `label-guard` and `todo-issues` workflows (byte-equal, or equal but for verified `uses:` refs; the comparison blanks refs with `scripts/workflow.awk -v mode=norm`) and a `main` or `master` default branch (`todo_issues_branch`); the [CI hygiene](#ci-hygiene) rules on every workflow and `action.yml` (`wf_parsed`, `wf_permissions`, `wf_timeout`, `wf_concurrency`, `wf_pinned`, the last with each pin resolved upstream and each `./` ref found in the repo); Dependabot with a version-update group and a Conventional Commit `commit-message.prefix` on every entry (`dependabot`, `dependabot_grouped`, `dependabot_prefix`; see [Dependabot updates](#dependabot-updates)); `AGENTS.md` and no tracked `CLAUDE.md` (`no_claude_md`; `sync.sh apply claude-md` opens a PR deleting the ones that are symlinks to `AGENTS.md`); the agent-config lines in `.gitignore` (`agent_ignore`); squash-only, delete-branch; no poetry; labels (standard plus the repo's `.github/labels.yaml`, no other, no extra redefining a standard one); `SECURITY.md` and issue templates (own or inherited); on public repos also auto-merge, `main` ruleset, secret scanning, private vulnerability reporting and `LICENSE`.
 - **Typed** (when applicable): tests (python, typescript, go); `uv.lock` + ruff + mypy + pytest (python); `go.mod` + `go vet` + `golangci-lint run` + `go test` with `-race` (any flag position, or `GOFLAGS`) + `govulncheck` in `ci.yml` or the Makefile (`go_toolchain`, go); hadolint in `ci.yml` or Makefile (any Dockerfile); a validate step (infra); `release-please-config.json` (released), plus `uv.lock` in its `extra-files` when the repo has one (`uv_lock_release`: release-please does not bump the version `uv.lock` records; select each `[[package]]` with `$.package[?(@.name.value=='<name>')].version`); `informational: true` (when `codecov.yml` exists); `environments` and `pypi_publish` (public repos only).
   - `environments` (`deploys: true` or `pypi: true`): every job in `.github/workflows/*.yml` with a publish/deploy step declares `environment:`. A step counts as publish/deploy when the job contains `gh-action-pypi-publish`, `uv publish`, `docker push`, `deploy-pages`, `cosign sign`, `wrangler deploy`, a `/webhooks/` call, `scp`/`rsync`/`ssh`, or `docker/build-push-action` with `push: true`. Repository secrets named like `PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER` also fail it (names only).
   - `pypi_publish` (`pypi: true`): `release-please-config.json` plus a workflow that publishes with `pypa/gh-action-pypi-publish` or `uv publish`, `id-token: write`, no token, `environment: pypi`, triggered by `release:` or a release-please output.
