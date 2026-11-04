@@ -1,4 +1,4 @@
-.PHONY: help lint test check audit onboard
+.PHONY: help lint test check prepush audit onboard
 .DEFAULT_GOAL := help
 
 help: ## Show this help
@@ -24,6 +24,8 @@ test: ## Smoke-test: the audit script parses, the topic parser reads type and fl
 	echo '{"topics":["std-python","std-docs"]}' | jq -ef scripts/meta.jq | jq -e '.type == "unknown"' >/dev/null
 
 check: lint test ## lint + test
+
+prepush: check ## Local gate before marking a PR ready (= check)
 
 audit: ## Report drift (read-only); JSON=1 prints JSON on stdout, text on stderr; VISIBILITY=public|private|all (default all)
 	@scripts/sync.sh audit $(if $(JSON),--json) --visibility $(or $(VISIBILITY),all)

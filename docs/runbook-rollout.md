@@ -36,12 +36,21 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 
 ## Tier a repo's CI (repos with a merge queue only)
 Prereq: the default branch requires a merge queue with an empty bypass list (`gh api repos/<owner>/<repo>/rules/branches/main --jq '.[] | select(.type == "merge_queue")'` prints the rule, with the `ruleset_id` whose `gh api repos/<owner>/<repo>/rulesets/<id> --jq .bypass_actors` prints `[]`). Without one, stop: the PR run stays the full gate ([CI tiers](standard.md#ci-tiers)).
-1. In one PR to the repo: add `merge_group:` and `workflow_dispatch:` to `ci.yml`'s `on`, give each full-tier job `if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'`, list exactly those jobs in `check`'s `FULL_TIER` allowlist, and add a `make prepush` target (the light tier plus the touched packages' integration tests).
+1. In one PR to the repo: add `merge_group:` and `workflow_dispatch:` to `ci.yml`'s `on`, give each full-tier job `if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'`, list exactly those jobs in `check`'s `FULL_TIER` allowlist, and point `make prepush` at the light tier plus the touched packages' integration tests.
 2. Verify on that PR: `check` and `Validate PR title` are green, and the full-tier jobs show `skipped` (`gh pr checks <n>`).
 3. Verify in the queue: after the PR enters the queue, the `merge_group` run ran every full-tier job (`gh run list --workflow ci.yml --event merge_group --limit 1`, then `gh run view <id>`), and `check` passed there.
 4. Measure: compare minutes per workflow and event before and after (harness [ci-cost.md](https://github.com/giocaizzi/harness/blob/main/plugins/dev-tools/skills/repo-standard/references/ci-cost.md)).
 
 Rollback: revert that PR; the required checks never changed, so the ruleset needs nothing.
+
+Run the full tier on PRs again without a revert (for example while a full-tier failure keeps slipping past the PR run): `gh variable set CI_FULL_TIER_ON_PR --repo <owner>/<repo> --body true`. The next ready PR run shows the full-tier jobs as run, not `skipped` (`gh pr checks <n>`). Back to tiers: `gh variable delete CI_FULL_TIER_ON_PR --repo <owner>/<repo>`.
+
+## Skip CI on drafts and add the local gate (every repo)
+1. In one PR to the repo: add `make prepush` (`prepush: check` without tiers), give `ci.yml` the draft triggers and conditions of [Drafts](standard.md#ci-hygiene) (copy `giocaizzi/template`'s `ci.yml`), and keep every job id unchanged.
+2. Verify as a draft: a push runs no `ci.yml` job, and `gh pr checks <n>` lists no `check` (the skipped job shows under its unevaluated name expression). `Validate PR title` still runs, as before.
+3. Verify on ready: `gh pr ready <n>` starts a run in which `check` and `Validate PR title` report and pass.
+
+Rollback: revert that PR; the required checks never changed.
 
 ## Dependabot bumps in this repo
 Dependabot bumps the actions in `.github/workflows/` here but not in `standard/workflows/`, so its PR fails `make test` (the copies must match). On that PR's branch run `cp .github/workflows/{pr-title,label-guard,todo-issues}.yml standard/workflows/`, commit and push; `make check` then passes and the next `apply workflows` ships the new pins.
