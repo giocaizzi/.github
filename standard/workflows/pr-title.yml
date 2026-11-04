@@ -17,8 +17,9 @@ permissions:
 jobs:
   validate:
     # A draft's edit that leaves the title alone skips the job: no runner, no billed minute. A skipped job passes a
-    # required check and may replace an earlier failed run, so the skipped run takes another name and never reports
-    # `Validate PR title`; the skip is limited to drafts (they cannot merge) and ready_for_review validates again.
+    # required check and may replace an earlier failed run, so the skipped run takes another name (GitHub lists it
+    # under the unevaluated expression text) and never reports `Validate PR title`; the skip is limited to drafts
+    # (they cannot merge) and ready_for_review validates again.
     # Keep the condition identical in `name` and `if`.
     name: ${{ (github.event.action == 'edited' && !github.event.changes.title && github.event.pull_request.draft) && 'Skip PR title (draft edit)' || 'Validate PR title' }}
     if: ${{ !(github.event.action == 'edited' && !github.event.changes.title && github.event.pull_request.draft) }}
