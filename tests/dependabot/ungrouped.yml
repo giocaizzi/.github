@@ -9,6 +9,14 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+  - package-ecosystem: bundler # quoted key, only a security group, not the last entry
+    directory: /
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      security:
+        "applies-to": security-updates
+        patterns: ["*"]
   - package-ecosystem: npm # no groups: one PR per dependency
     directory: /
     schedule:
@@ -29,3 +37,4 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
       sec-flow: {applies-to: security-updates, patterns: ["*"]}
+      sec-quoted: {"applies-to": "security-updates"}

@@ -27,10 +27,10 @@ t not_ok "100644 a1 dir/action.yml" ./      # no action.yml at the root
 
 # the dependabot helpers print "<entries> <failing entries>" for each fixture
 counts() { t test "$("$1" < "$2")" = "$3"; }
-counts dependabot_ungrouped tests/dependabot/grouped.yml "2 0"
-counts dependabot_unprefixed tests/dependabot/grouped.yml "2 0"
-counts dependabot_ungrouped tests/dependabot/ungrouped.yml "4 3"
-counts dependabot_unprefixed tests/dependabot/ungrouped.yml "4 1"
+counts dependabot_ungrouped tests/dependabot/grouped.yml "3 0"
+counts dependabot_unprefixed tests/dependabot/grouped.yml "3 0"
+counts dependabot_ungrouped tests/dependabot/ungrouped.yml "5 4"
+counts dependabot_unprefixed tests/dependabot/ungrouped.yml "5 1"
 counts dependabot_ungrouped .github/dependabot.yml "1 0"   # this repo's own config meets the standard
 counts dependabot_unprefixed .github/dependabot.yml "1 0"
 counts dependabot_ungrouped /dev/null "0 0"

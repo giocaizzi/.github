@@ -18,10 +18,20 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
-      minor-patch: {update-types: [minor, patch]}
+      minor-patch: {update-types: [minor, patch]} # not applies-to: security-updates
       major:
         update-types: [major]
       # security updates batched, never held
       security:
         applies-to: security-updates
         patterns: ["*"]
+  - package-ecosystem: docker # groups before the other keys
+    groups:
+      docker:
+        patterns: ["*"]
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "chore(deps)"

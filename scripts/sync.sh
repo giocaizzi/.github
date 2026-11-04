@@ -134,8 +134,9 @@ dependabot_ungrouped() {
     gi >= 0 && ind <= gi {end_group(); gi = -1}
     gi >= 0 {
       if (ci < 0) ci = ind
-      if (ind == ci) {end_group(); gn = $1; sec = ($0 ~ /applies-to:[[:space:]]*["\047]?security-updates/)}
-      else if ($0 ~ /^[[:space:]]*applies-to:[[:space:]]*["\047]?security-updates/) sec = 1
+      l = $0; sub(/[[:space:]]+#.*$/, "", l) # a trailing comment never counts
+      if (ind == ci) {end_group(); gn = $1; sec = (l ~ /["\047]?applies-to["\047]?:[[:space:]]*["\047]?security-updates/)}
+      else if (l ~ /^[[:space:]]*["\047]?applies-to["\047]?:[[:space:]]*["\047]?security-updates/) sec = 1
       next}
     /^[[:space:]]*groups:[[:space:]]*(#.*)?$/ {gi = ind; ci = -1}
     END {end_group(); for (i = 1; i <= n; i++) if (!g[i]) b++; print n+0, b+0}'
