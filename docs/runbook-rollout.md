@@ -43,6 +43,16 @@ Prereq: the default branch requires a merge queue with an empty bypass list (`gh
 
 Rollback: revert that PR; the required checks never changed, so the ruleset needs nothing.
 
+## Group a repo's Dependabot updates
+The owner decides which repos get it and when; each gets one small PR that changes only `.github/dependabot.yml`.
+1. `scripts/sync.sh audit <repo>` here: note `dependabot`, `dependabot_grouped` and `dependabot_prefix`. Read the repo's `.github/dependabot.yml` for what the audit does not check: the schedule, `open-pull-requests-limit` and any `labels:` key.
+2. In the repo, one PR titled `ci(deps): group dependabot updates weekly` that brings every entry it already lists to the [shape](standard.md#dependabot-updates) (weekly schedule, cap, groups, prefix, no `labels:`), keeping its ecosystems and directories: none added or removed. `giocaizzi/template` carries the `github-actions` entry and the language shape as a comment.
+3. After it merges, check that Dependabot read the file: repo Insights > Dependency graph > Dependabot lists each entry with its last check and any config error.
+4. Close the per-dependency Dependabot PRs opened before the change once the first grouped PR covers them (`gh pr list --author app/dependabot`); never merge them one by one.
+5. Re-run `scripts/sync.sh audit <repo>`: the three checks pass.
+
+Rollback: revert that PR. Security updates are a repo setting (`sync.sh apply settings`), which the PR never touches.
+
 ## Dependabot bumps in this repo
 Dependabot bumps the actions in `.github/workflows/` here but not in `standard/workflows/`, so its PR fails `make test` (the copies must match). On that PR's branch run `cp .github/workflows/{pr-title,label-guard,todo-issues}.yml standard/workflows/`, commit and push; `make check` then passes and the next `apply workflows` ships the new pins.
 

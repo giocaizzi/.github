@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests scripts/sync.sh pieces that decide pass, drift or a broken run, without GitHub:
 # - local_ok: where a `./` ref may point (sourced helpers);
+# - dependabot_ungrouped / dependabot_unprefixed: grouped and ungrouped fixtures (tests/dependabot/);
 # - a missing checker lock is a crash, so nothing passes and the run is broken;
 # - an API failure and a truncated repo tree stop an audit with exit 2, never drift (tests/fake-gh/gh).
 # shellcheck disable=SC2154,SC2317,SC2329 # pin_cache and broken come from the sourced sync.sh; t() calls not_ok
@@ -23,6 +24,16 @@ t not_ok "$tree" ./link                     # a symlink to a directory is not sc
 t not_ok "$tree" ./linked                   # nor an action.yml that is a symlink
 t not_ok "$tree" ./missing
 t not_ok "100644 a1 dir/action.yml" ./      # no action.yml at the root
+
+# the dependabot helpers print "<entries> <failing entries>" for each fixture
+counts() { t test "$("$1" < "$2")" = "$3"; }
+counts dependabot_ungrouped tests/dependabot/grouped.yml "3 0"
+counts dependabot_unprefixed tests/dependabot/grouped.yml "3 0"
+counts dependabot_ungrouped tests/dependabot/ungrouped.yml "5 4"
+counts dependabot_unprefixed tests/dependabot/ungrouped.yml "5 1"
+counts dependabot_ungrouped .github/dependabot.yml "1 0"   # this repo's own config meets the standard
+counts dependabot_unprefixed .github/dependabot.yml "1 0"
+counts dependabot_ungrouped /dev/null "0 0"
 
 # a missing lock file: a wf_parsed finding and a broken record
 tmp=$(mktemp -d); mkdir "$tmp/scripts"; cp scripts/workflow.py "$tmp/scripts/"
