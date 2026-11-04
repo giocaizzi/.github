@@ -9,6 +9,10 @@ Start from `giocaizzi/template` and run `make onboard REPO=<name> TYPE=<type> [F
 - `main` changes only through a PR that passed CI; no bypass actors, no force-push, no deletion.
 - Squash merge only. The squash commit is built from the PR, never from branch commits: title = PR title (`squash_merge_commit_title: PR_TITLE`), body = PR description (`squash_merge_commit_message: PR_BODY`). Branch commit messages are history only.
 - PR title is a Conventional Commit header, `type(scope): lowercase description`; it is the commit on `main` and drives release-please. Required check `Validate PR title` (`standard/workflows/pr-title.yml`) enforces it in CI; the `guard` plugin of `giocaizzi/harness` enforces it before `gh pr create` / `git commit` run.
+  - It runs on `opened`, `edited`, `synchronize`, `reopened` and `ready_for_review`, and on `merge_group`. The title is read from an env var, never interpolated into the script.
+  - How a required check reads runs: a job skipped by a job-level `if` reports success and does not block a merge ([GitHub docs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions)); only a workflow skipped by a trigger filter (`paths`, `branches`, a commit message) leaves its check pending ([GitHub docs](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)). The newest run of a check on the head commit replaces the earlier one, so a skip after a failed run turns the check green.
+  - So the job skips only a draft's `edited` event that leaves the title alone (no `changes.title`, e.g. a body edit): no runner starts, so no minute is billed, and it is safe because a draft cannot merge or arm auto-merge and `ready_for_review` validates the title again. On a ready PR every edit still runs: a skip there would let a body edit turn a failed title check green. A green no-op step would not help: the job still starts and is billed, rounded up to a whole minute ([GitHub docs](https://docs.github.com/en/billing/reference/actions-runner-pricing)), and it would have the same hole.
+  - Known gap: a `merge_group` run validates nothing (the step runs on `pull_request` only), so a queue trusts the PR run. No user-owned repo has a queue. The recommended fix for a repo with one: in the `merge_group` run, read the queued PR's number from `github.event.merge_group.head_ref` (`gh-readonly-queue/<base>/pr-<n>-<sha>`), fetch its title with `gh pr view <n> --json title` (`pull-requests: read`) and validate it in the same env-var script.
 - PR description follows `.github/PULL_REQUEST_TEMPLATE.md` (What / Why / Verification), then footers as plain trailing lines: `BREAKING CHANGE:`, `Refs:`, attribution.
 - Auto-merge on; branch deleted on merge. Stacked PRs with `gh stack` for layered work.
 - Review threads must be resolved; approvals 0 while solo.
@@ -33,7 +37,7 @@ Type (bug, enhancement, documentation, question, wontfix, invalid, duplicate), p
 Every repo runs `standard/workflows/todo-issues.yml` (`alstr/todo-to-issue-action`): a push to the default branch that adds a `TODO` comment opens an issue labelled `todo`, and removing the comment closes it. It triggers on pushes to `main` or `master` only (the default branch names in use; `on.push.branches` cannot read the default branch), plus manual dispatch, and its job-level `if` keeps it to the default branch, so pushes to other branches start no run. A default branch with another name fails the audit (`todo_issues_branch`). It reads the push diff only; to import the TODOs a repo already has, `sync.sh apply todos <repo>` runs it once by hand over the whole history (an issue with the same title, open or closed, is never duplicated).
 
 ## CI and releases
-- One `ci.yml` per repo, plain (no reusable workflows). Python: `uv`, ruff, mypy, pytest; new projects start with ruff `select = ["ALL"]` and Google docstrings (`pydocstyle` `convention = "google"`). Every repo exposes `make help|lint|test|check` and CI runs `make check`.
+- One `ci.yml` per repo, plain (no reusable workflows). Python: `uv`, ruff, mypy, pytest; new projects start with ruff `select = ["ALL"]` and Google docstrings (`pydocstyle` `convention = "google"`). Every repo exposes `make help|lint|test|check` and CI runs `make check`; a repo with [CI tiers](#ci-tiers) also exposes `make prepush`.
 - Releases via release-please with a GitHub App token (so the release PR triggers CI). Tags `v*`.
 - Python tooling is `uv` only; no poetry.
 - Go (`std-go`): module at the repo root (`go.mod`, its `go` line pins the toolchain CI uses). The recipe below; versions checked on 2026-10-20. Dependabot bumps the action refs (`github-actions`) and `go.mod` (`gomod`), but not the golangci-lint `version:` input or the govulncheck `@v` pin in the Makefile: bump those two by hand.
@@ -93,7 +97,37 @@ Every workflow in `.github/workflows/`, the standard's own included, and every `
   - Dependabot here bumps `.github/workflows/` only, not `standard/workflows/`; `make test` fails until the same bump is copied there (`cp .github/workflows/{pr-title,label-guard,todo-issues}.yml standard/workflows/`), so the two stay equal.
 - **Narrow triggers**: a workflow that acts on the default branch only triggers on it (`branches:`), not on every push with a job-level skip.
 
-These rules never cost a check. On every pull request the required checks always run, whatever the paths, never behind a job-level skip: `check` (with the gitleaks secret scan) and `Validate PR title`; so does every workflow lint (e.g. actionlint) or dependency review a repo adds. No rule here removes a required check, makes one skippable or loosens a ruleset or a permission.
+These rules never cost a check. On every pull request the required checks always run, whatever the paths: `check` (with the gitleaks secret scan) and `Validate PR title` (which skips only a draft's edit that leaves the title alone, see [Pull requests](#pull-requests)); so does every workflow lint (e.g. actionlint) or dependency review a repo adds. In a repo with a merge queue, [CI tiers](#ci-tiers) move only full-tier jobs off the PR run; `check` still reports on every run. No rule here removes a required check, makes one skippable or loosens a ruleset or a permission.
+
+## CI tiers
+Only in a repo whose default branch has a merge queue that every change must pass (the ruleset requires it, with an empty bypass list). A repo without one (every user-owned repo, see [Ruleset](#ruleset-standardruleset-mainjson)) has no tiers: the PR run is the gate and runs everything.
+
+- **Light tier, every PR push**: the secret scan (gitleaks), workflow lint (actionlint, where the repo runs it), `Validate PR title`, build, vet and lint, and the unit tests of the touched packages (or the repo's cheapest correct test subset; touched packages come from a `changes` job, as in the harness [CI for a gate checklist](https://github.com/giocaizzi/harness/blob/main/plugins/dev-tools/skills/github-workflow/SKILL.md#ci-for-a-gate-checklist)). All of it rolls up into the required aggregate `check`.
+- **Full tier, `merge_group` only** (and an opt-in dispatch, below): slow or wide suites (integration tests, chart tests, end-to-end scenarios, cross-OS legs, image and release builds, the coverage floor). The `merge_group` run tests the base plus the queued entries, the tree that lands.
+- **How**: each full-tier job carries a job-level `if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'`, never a workflow-level `paths` / `paths-ignore` filter or a workflow of its own, so `check` always reports; `ci.yml` also triggers on `merge_group` and `workflow_dispatch`. `check` accepts `skipped` only for the jobs of the tier that event leaves out (an explicit per-job, per-event allowlist, never "skipped is fine") and, for a job a `changes` job gates, a skip only when `changes` said it was not needed; it fails on any other skip, failure or cancellation. Required checks and the ruleset do not change: `check` and `Validate PR title` report on both `pull_request` and `merge_group`.
+  ```yaml
+  check:
+    needs: [secrets, lint, unit, integration, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every needed job passed, or was skipped by its tier
+        env:
+          EVENT: ${{ github.event_name }}
+          RESULTS: ${{ toJSON(needs) }}
+          FULL_TIER: integration e2e # skipped on pull_request and push
+        run: |
+          jq -e --arg event "$EVENT" --arg full "$FULL_TIER" '($full | split(" ")) as $f
+            | to_entries | all(.value.result == "success"
+              or (.value.result == "skipped" and ($event == "pull_request" or $event == "push") and (.key | IN($f[]))))' <<<"$RESULTS"
+  ```
+- **Early full run**: only by explicit opt-in, a `workflow_dispatch` of `ci.yml` on the PR branch (`gh workflow run ci.yml --ref <branch>`, write access needed, so a fork PR cannot be promoted and waits for the queue); never automatically on `ready_for_review`.
+- **Security** (unchanged by tiering, see the harness [CI for a gate checklist](https://github.com/giocaizzi/harness/blob/main/plugins/dev-tools/skills/github-workflow/SKILL.md#ci-for-a-gate-checklist)): PR code never gets secrets or a write token; no `pull_request_target` for tier logic; no `actions: write` to cancel runs for a fast fail; fork and bot PRs take the same path as any other.
+- **Local gate**: a tiered repo exposes `make prepush`, the light tier plus the integration tests of the touched packages; agents run it before marking a PR ready.
+- Why tiers pay off, and how to measure minutes per workflow and event: the harness [ci-cost.md](https://github.com/giocaizzi/harness/blob/main/plugins/dev-tools/skills/repo-standard/references/ci-cost.md) and [github-workflow rule 1](https://github.com/giocaizzi/harness/blob/main/plugins/dev-tools/skills/github-workflow/SKILL.md#landing-a-change).
+
+Documented, not audited (the audit cannot tell a repo's tiers from its jobs).
 
 ## Bots
 Scheduled bots never push to the default branch. They write to a fixed branch, open a PR with a Conventional Commit title and arm auto-merge, authenticated with the release-please GitHub App token (`RP_APP_ID` / `RP_APP_KEY` secrets, `actions/create-github-app-token`) so CI runs on the PR; `GITHUB_TOKEN` PRs do not trigger workflows. Reference: `btc-cycles` `.github/workflows/run.yml`. Known exceptions, listed in `standard/ruleset-exceptions.txt` when public: `giocaizzi` (profile README; the daily stats bot pushes `main` directly, so the repo has no `main` ruleset). A private repo whose bot or app sync pushes `main` directly needs no entry: private repos have no ruleset on the free plan.
