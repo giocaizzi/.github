@@ -122,6 +122,34 @@ newer_pins() {
       && printf '%s=%s # %s;' "$repo" "$sha" "$tag"
   done <<<"$v" || true # a loop ending on a false test is not a failure
 }
+# Dependabot config on stdin; each prints "<updates entries> <failing entries>".
+# A failing entry for dependabot_ungrouped has no version-update group: no `groups:` block, an empty one, or only
+# groups with `applies-to: security-updates` (security updates are not held to groups; they are neither required nor counted).
+dependabot_ungrouped() {
+  awk '
+    function end_group() { if (gn != "" && !sec) g[n] = 1; gn = "" }
+    /^[[:space:]]*- package-ecosystem:/ {end_group(); n++; g[n] = 0; gi = -1; next}
+    !n || !NF || $1 ~ /^#/ {next}
+    {match($0, /^ */); ind = RLENGTH}
+    gi >= 0 && ind <= gi {end_group(); gi = -1}
+    gi >= 0 {
+      if (ci < 0) ci = ind
+      if (ind == ci) {end_group(); gn = $1; sec = ($0 ~ /applies-to:[[:space:]]*["\047]?security-updates/)}
+      else if ($0 ~ /^[[:space:]]*applies-to:[[:space:]]*["\047]?security-updates/) sec = 1
+      next}
+    /^[[:space:]]*groups:[[:space:]]*(#.*)?$/ {gi = ind; ci = -1}
+    END {end_group(); for (i = 1; i <= n; i++) if (!g[i]) b++; print n+0, b+0}'
+}
+# A failing entry for dependabot_unprefixed has no commit-message.prefix that is a Conventional Commit type(scope).
+dependabot_unprefixed() {
+  awk '
+    /^[[:space:]]*- package-ecosystem:/ {n++; p[n]=0; ci=-1; next}
+    n && /^[[:space:]]*commit-message:[[:space:]]*(#.*)?$/ {match($0, /^ */); ci=RLENGTH; next}
+    ci >= 0 && NF && $1 !~ /^#/ {match($0, /^ */); if (RLENGTH <= ci) ci=-1
+      else if ($1 == "prefix:") {v=$2; gsub(/["\047]/, "", v)
+        if (v ~ /^(feat|fix|perf|refactor|revert|docs|style|test|build|ci|chore)(\([a-z0-9._\/-]+\))?$/) p[n]=1}}
+    END {for (i = 1; i <= n; i++) if (!p[i]) b++; print n+0, b+0}'
+}
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by scripts/test-sync.sh for the helpers above
 
 
@@ -381,21 +409,11 @@ for r in "${repos[@]}"; do
     chk "$c" standard "$(ok test -z "$d")" "$d"
   done
   chk dependabot standard "$(ok has '\.github/dependabot\.ya?ml')" "no .github/dependabot.yml"
-  # every updates entry needs a non-empty `groups:` block; prints "<entries> <ungrouped>"
-  read -r n bad < <( { raw .github/dependabot.yml; raw .github/dependabot.yaml; } | awk '
-    /^[[:space:]]*- package-ecosystem:/ {n++; g[n]=0; gi=-1; next}
-    n && /^[[:space:]]*groups:[[:space:]]*(#.*)?$/ {match($0, /^ */); gi=RLENGTH; next}
-    gi >= 0 && NF && $1 !~ /^#/ {match($0, /^ */); if (RLENGTH > gi) g[n]=1; gi=-1}
-    END {for (i = 1; i <= n; i++) if (!g[i]) b++; print n+0, b+0}')
-  chk dependabot_grouped standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without groups"
+  # every updates entry needs a version-update group (not only applies-to: security-updates); prints "<entries> <ungrouped>"
+  read -r n bad < <( { raw .github/dependabot.yml; raw .github/dependabot.yaml; } | dependabot_ungrouped)
+  chk dependabot_grouped standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without a version-update group"
   # every updates entry needs commit-message.prefix = Conventional Commit type(scope), so PR titles pass pr-title.yml
-  read -r n bad < <( { raw .github/dependabot.yml; raw .github/dependabot.yaml; } | awk '
-    /^[[:space:]]*- package-ecosystem:/ {n++; p[n]=0; ci=-1; next}
-    n && /^[[:space:]]*commit-message:[[:space:]]*(#.*)?$/ {match($0, /^ */); ci=RLENGTH; next}
-    ci >= 0 && NF && $1 !~ /^#/ {match($0, /^ */); if (RLENGTH <= ci) ci=-1
-      else if ($1 == "prefix:") {v=$2; gsub(/["\047]/, "", v)
-        if (v ~ /^(feat|fix|perf|refactor|revert|docs|style|test|build|ci|chore)(\([a-z0-9._\/-]+\))?$/) p[n]=1}}
-    END {for (i = 1; i <= n; i++) if (!p[i]) b++; print n+0, b+0}')
+  read -r n bad < <( { raw .github/dependabot.yml; raw .github/dependabot.yaml; } | dependabot_unprefixed)
   chk dependabot_prefix standard "$(ok test "$n" -gt 0 -a "$bad" = 0)" "$bad of $n dependabot updates entries without a Conventional Commit commit-message.prefix"
   chk agents_md standard "$(ok has AGENTS\\.md)" "no AGENTS.md"
   d=$(agent_ignore_missing | paste -sd, -)
