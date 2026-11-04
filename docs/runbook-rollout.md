@@ -46,11 +46,21 @@ Rollback: revert that PR; the required checks never changed, so the ruleset need
 Run the full tier on PRs again without a revert (for example while a full-tier failure keeps slipping past the PR run); a repo tiered before the rollback existed first adds its clause to each full-tier `if`: `gh variable set CI_FULL_TIER_ON_PR --repo <owner>/<repo> --body true`. The next ready PR run shows the full-tier jobs as run, not `skipped` (`gh pr checks <n>`). Back to tiers: `gh variable delete CI_FULL_TIER_ON_PR --repo <owner>/<repo>`.
 
 ## Skip CI on drafts and add the local gate (every repo)
-1. In one PR to the repo: add `make prepush` (`prepush: check` without tiers), give `ci.yml` the draft triggers and conditions of [Drafts](standard.md#ci-hygiene) (as `giocaizzi/template`'s `ci.yml` does once its matching change lands), and keep every job id unchanged.
+1. In one PR to the repo: add `make prepush` (`prepush: check` without tiers), give `ci.yml` the draft triggers and conditions of [Drafts](standard.md#ci-hygiene) (copy `giocaizzi/template`'s `ci.yml`), and keep every job id unchanged.
 2. Verify as a draft: a push runs no `ci.yml` job, and `gh pr checks <n>` lists no `check` (the skipped job shows under its unevaluated name expression). `Validate PR title` still runs, as before.
 3. Verify on ready: `gh pr ready <n>` starts a run in which `check` and `Validate PR title` report and pass.
 
 Rollback: revert that PR; the required checks never changed.
+
+## Group a repo's Dependabot updates
+The owner decides which repos get it and when; each gets one small PR that changes only `.github/dependabot.yml`.
+1. `scripts/sync.sh audit <repo>` here: note `dependabot`, `dependabot_grouped` and `dependabot_prefix`. Read the repo's `.github/dependabot.yml` for what the audit does not check: the schedule, `open-pull-requests-limit` and any `labels:` key.
+2. In the repo, one PR titled `ci(deps): group dependabot updates weekly` that brings every entry it already lists to the [shape](standard.md#dependabot-updates) (weekly schedule, cap, groups, prefix, no `labels:`), keeping its ecosystems and directories: none added or removed. `giocaizzi/template` carries the `github-actions` entry and the language shape as a comment.
+3. After it merges, check that Dependabot read the file: repo Insights > Dependency graph > Dependabot lists each entry with its last check and any config error.
+4. Close the per-dependency Dependabot PRs opened before the change once the first grouped PR covers them (`gh pr list --author app/dependabot`); never merge them one by one.
+5. Re-run `scripts/sync.sh audit <repo>`: the three checks pass.
+
+Rollback: revert that PR. Security updates are a repo setting (`sync.sh apply settings`), which the PR never touches.
 
 ## Dependabot bumps in this repo
 Dependabot bumps the actions in `.github/workflows/` here but not in `standard/workflows/`, so its PR fails `make test` (the copies must match). On that PR's branch run `cp .github/workflows/{pr-title,label-guard,todo-issues}.yml standard/workflows/`, commit and push; `make check` then passes and the next `apply workflows` ships the new pins.
