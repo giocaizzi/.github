@@ -35,7 +35,7 @@ On pypi.org, project > Publishing > add a GitHub trusted publisher: owner `gioca
 7. Re-run the audit; it must report `ok` for the repo.
 
 ## Tier a repo's CI (repos with a merge queue only)
-Prereq: the default branch requires a merge queue with an empty bypass list (`gh api repos/<owner>/<repo>/rules/branches/main --jq '.[] | select(.type == "merge_queue")'` prints the rule). Without one, stop: the PR run stays the full gate ([CI tiers](standard.md#ci-tiers)).
+Prereq: the default branch requires a merge queue with an empty bypass list (`gh api repos/<owner>/<repo>/rules/branches/main --jq '.[] | select(.type == "merge_queue")'` prints the rule, with the `ruleset_id` whose `gh api repos/<owner>/<repo>/rulesets/<id> --jq .bypass_actors` prints `[]`). Without one, stop: the PR run stays the full gate ([CI tiers](standard.md#ci-tiers)).
 1. In one PR to the repo: add `merge_group:` and `workflow_dispatch:` to `ci.yml`'s `on`, give each full-tier job `if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'`, list exactly those jobs in `check`'s `FULL_TIER` allowlist, and add a `make prepush` target (the light tier plus the touched packages' integration tests).
 2. Verify on that PR: `check` and `Validate PR title` are green, and the full-tier jobs show `skipped` (`gh pr checks <n>`).
 3. Verify in the queue: after the PR enters the queue, the `merge_group` run ran every full-tier job (`gh run list --workflow ci.yml --event merge_group --limit 1`, then `gh run view <id>`), and `check` passed there.
