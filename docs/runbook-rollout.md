@@ -14,7 +14,9 @@ JSON for the dashboard:
 make audit JSON=1 > audit.json         # JSON on stdout, text report on stderr
 scripts/sync.sh audit --json greenhouse # one repo
 ```
-One object per repo: `repo`, `type`, `released`, `private`, `exempt` (check ids that do not apply), `checks` (`{id: {kind, pass, detail?}}`), `extras` (`{id: {kind, present}}`), `score` (`standard`, `typed`, `extras` as `n/m`).
+One object per repo: `repo`, `type`, `released`, `private`, `exempt` (check ids that do not apply), `unknown` (count of checks the audit could not read), `checks` (`{id: {kind, pass, status, detail?}}`, `status` is `pass`, `fail` or `unknown`), `extras` (`{id: {kind, present}}`), `score` (`standard`, `typed`, `extras` as `n/m`), and `tooling` (`{tool_id: {group, value, expected, status, severity}}`, the tool versions in use: `group` is `common`, `python`, `js` or `go`, `status` is `same`, `differs`, `absent`, `n.a.` or `unknown`, `severity` is `info`, `warn` or `fail`). JSON without `status`, `unknown` or `tooling` (older runs) still renders: the status comes from `pass`.
+
+Render the Markdown report of a JSON file (the body of the drift issue, see below): `uv run --quiet --script scripts/report.py [--date YYYY-MM-DD] [--run-url URL] < audit.json > report.md`.
 
 ## New repo
 1. Create it from the template: `gh repo create giocaizzi/<name> --template giocaizzi/template --public --clone` (starts with CI `check`, PR-title, label-guard and todo-issues workflows, Dependabot, Makefile, AGENTS.md, LICENSE).
@@ -69,7 +71,9 @@ Dependabot bumps the actions in `.github/workflows/` here but not in `standard/w
 Delete the ruleset: `gh api -X DELETE repos/giocaizzi/<repo>/rulesets/<id>` (id from `gh api repos/giocaizzi/<repo>/rulesets`). Settings and labels are additive and need no rollback.
 
 ## Scheduled audit
-`.github/workflows/audit.yml` runs weekly with `--visibility public`, uploads `audit.json` as the artifact `audit` (kept 90 days) and opens or updates a `drift` issue; both are public, so they cover public repos only. Private repos are audited locally with `--visibility private`; their results are never stored on GitHub. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration, Contents, Issues, Secrets and Metadata; Secrets lists names only, for the repository-secret check on all repos).
+`.github/workflows/audit.yml` runs weekly with `--visibility public`, uploads `audit.json` as the artifact `audit` (kept 90 days), renders it with `scripts/report.py` and writes the result into the body of the open `drift` issue (created when there is drift and none is open). The body is edited in place each run, never commented on, and also when a run finds no drift, so it never goes stale; close the issue by hand once the drift is fixed. Both are public, so they cover public repos only.
+
+The body has these sections: a summary line (repos checked, drifted, with unknown checks, ok), `Drift` (one row per failing check and repo: found, wanted), `Unknown (cannot read)`, `How to fix` (the `sync.sh apply` mode or the manual step per check id) and `Tooling` (a collapsed matrix of the tool versions per group, informational; only `fail` cells are also listed under Drift). Unknown is not drift: the audit token could not read the setting (for example HTTP 403); fix it by widening the token's read scope (below), then the next run reports the real state. A private repo is never named in the body (`private repo N`). A body over 60000 characters drops `Tooling` first, then table rows; the full data is in the artifact. Private repos are audited locally with `--visibility private`; their results are never stored on GitHub. It needs the `AUDIT_TOKEN` secret (fine-grained PAT, read-only Administration, Contents, Issues, Secrets and Metadata; Secrets lists names only, for the repository-secret check on all repos).
 
 The dashboard fetches the latest public JSON from here and audits private repos itself with the owner's `gh` login (`scripts/sync.sh audit --json --visibility private`):
 ```bash
