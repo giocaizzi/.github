@@ -166,5 +166,12 @@
     "severity": "info",
     "status": "n.a.",
     "value": ""
+  },
+  "worktree_installs": {
+    "expected": "none",
+    "group": "common",
+    "severity": "info",
+    "status": "differs",
+    "value": "$(CURDIR)/bin, ./bin install, --bin-dir ./.envtest"
   }
 }

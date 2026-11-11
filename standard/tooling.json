@@ -7,6 +7,7 @@
     "ci_check_job": { "severity": "info", "expected": "present" },
     "docker_pins": { "severity": "info", "expected": "all" },
     "release_tooling": { "severity": "info", "expected": "release-please" },
+    "worktree_installs": { "severity": "info", "expected": "none" },
     "python_version": { "severity": "info", "expected": ">=3.14" },
     "python_pm": { "severity": "info", "expected": "uv" },
     "ruff": { "severity": "info", "expected": "select=ALL" },

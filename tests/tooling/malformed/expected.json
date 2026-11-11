@@ -166,5 +166,12 @@
     "severity": "info",
     "status": "unknown",
     "value": "unparseable"
+  },
+  "worktree_installs": {
+    "expected": "none",
+    "group": "common",
+    "severity": "info",
+    "status": "n.a.",
+    "value": "no Makefile"
   }
 }

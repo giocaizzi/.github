@@ -25,6 +25,7 @@ Version expectations compare numeric tuples; a range such as `>=3.12` or `^3.10`
 | `ci_check_job` | common | `ci.yml` | `present` (job `check`) / `absent` / `no ci.yml` | `present` |
 | `docker_pins` | common | every `Dockerfile*` | `FROM` images pinned by `@sha256:` / all (stage aliases and `scratch` excluded), or `no Dockerfile` | `all` |
 | `release_tooling` | common | `release-please-config.json`, `.release-please-manifest.json` | `release-please` / `none` | `release-please`, only for a released repo (`--released true`); otherwise none |
+| `worktree_installs` | common | `Makefile` (comment lines skipped) | the [installs into the checkout](standard.md#ci-and-releases) it finds: `$(CURDIR)/bin`, `--bin-dir <path>` with a path inside the repo (relative, `$(CURDIR)`, `$(PWD)`), `./bin install` (an `install` line writing to `./bin`), else `none`; `no Makefile` is `n.a.` | `none` |
 | `python_version` | python | `pyproject.toml` (`requires-python`, poetry `python`), `.python-version`, `setup-python` / `setup-uv` in workflows (matrices expanded) | `>=3.12; .python-version 3.13; ci 3.12,3.13` | `>=3.14`, on `requires-python`, else `.python-version` |
 | `python_pm` | python | `uv.lock`, `poetry.lock`, `[tool.uv]`, `[tool.poetry]` | `uv` / `poetry` / `pip` | `uv` |
 | `ruff` | python | `ruff.toml`, `.ruff.toml`, `[tool.ruff]` | `select=ALL, ignore=12 rules, line-length=120` | `select=ALL` |

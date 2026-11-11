@@ -52,6 +52,8 @@ JS_TEST_CONFIG = re.compile(r"(vitest)\.(?:config|workspace)\..+|(jest)\.config\
 GOLANGCI = re.compile(r"\.golangci\.(?:ya?ml|toml|json)")
 GOLANGCI_BASELINE = re.compile(r"\.?golangci[-_.]?baseline[^/]*")
 TSCONFIG = re.compile(r"tsconfig[^/]*\.json")
+# `--bin-dir` into the checkout: $(CURDIR), $(PWD), $(shell pwd) or a relative path (not /, ~ or another variable)
+BIN_DIR = re.compile(r"--bin-dir[= ]+((?:\$[({](?:CURDIR|PWD|shell pwd)[)}]|\$\$PWD|(?![/~$\"'])\S)\S*)")
 # what `wanted` asks the audit to fetch: only files a collector reads (presence-only files come from the tree)
 WANTED = re.compile(
     r"pyproject\.toml|\.python-version|ruff\.toml|\.ruff\.toml|mypy\.ini|setup\.cfg|pytest\.ini|\.coveragerc"
@@ -413,6 +415,25 @@ def release_tooling(ctx: Ctx, _exp: str) -> Result:
     """Whether release-please is configured."""
     found = ctx.has("release-please-config.json") or ctx.has(".release-please-manifest.json")
     return Result("release-please" if found else "none", "same" if found else "absent")
+
+
+def worktree_installs(ctx: Ctx, exp: str) -> Result:
+    """Makefile lines that install tools inside the checkout: `$(CURDIR)/bin`, an in-repo `--bin-dir`, `./bin`."""
+    text = ctx.text("Makefile")
+    if text is None:
+        return Result("no Makefile", "n.a.")
+    found: list[str] = []
+    for line in text.splitlines():
+        if re.match(r"\s*@?#", line):
+            continue
+        if re.search(r"\$[({]CURDIR[)}]/bin\b", line):
+            found.append("$(CURDIR)/bin")
+        if match := re.search(BIN_DIR, line):
+            found.append(f"--bin-dir {match.group(1)}")
+        if re.search(r"\binstall\b", line) and re.search(r"(?:^|[\s=])\./bin\b", line):
+            found.append("./bin install")
+    value = ", ".join(dict.fromkeys(found)) or "none"
+    return Result(value, "same" if value == exp else "differs")
 
 
 # --- python -----------------------------------------------------------------------------------------------------
@@ -794,6 +815,7 @@ CHECKS: tuple[Check, ...] = (
     Check("ci_check_job", "common", "present", ci_check_job),
     Check("docker_pins", "common", "all", docker_pins),
     Check("release_tooling", "common", "release-please", release_tooling),
+    Check("worktree_installs", "common", "none", worktree_installs),
     Check("python_version", "python", ">=3.14", python_version),
     Check("python_pm", "python", "uv", python_pm),
     Check("ruff", "python", "select=ALL", ruff),
