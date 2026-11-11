@@ -19,7 +19,7 @@ test: ## Smoke-test: the audit script parses, the topic parser reads type and fl
 	scripts/test-tooling.sh
 	scripts/test-report.sh
 	@# Dependabot bumps .github/workflows/ only: a bump here must also land in standard/workflows/ (cp, see docs/runbook-rollout.md)
-	for w in pr-title label-guard todo-issues; do cmp standard/workflows/$$w.yml .github/workflows/$$w.yml || exit 1; done
+	for w in pr-title label-guard todo-issues stale; do cmp standard/workflows/$$w.yml .github/workflows/$$w.yml || exit 1; done
 	echo '{"topics":["gis","std-python","std-released","std-exception-agent-ignore"]}' | jq -ef scripts/meta.jq \
 	  | jq -e '.type == "python" and .released and (.pypi | not) and .exceptions == ["agent_ignore"]' >/dev/null
 	echo '{"topics":["std-go"]}' | jq -ef scripts/meta.jq | jq -e '.type == "go"' >/dev/null

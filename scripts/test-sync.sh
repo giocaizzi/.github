@@ -5,6 +5,7 @@
 # - a missing checker lock is a crash, so nothing passes and the run is broken;
 # - an API failure and a truncated repo tree stop an audit with exit 2, never drift (tests/fake-gh/gh);
 # - the workflow scan (any case, empty stem), unknown vs drift, the tooling inventory glue (stub: tests/fake-gh/tooling-stub.py).
+# - the audit's `stale` check passes the standard stale workflow and fails a missing or drifted copy.
 # shellcheck disable=SC2154,SC2317,SC2329 # pin_cache and broken come from the sourced sync.sh; t() calls not_ok
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,6 +31,12 @@ t not_ok "$tree" ./link                     # a symlink to a directory is not sc
 t not_ok "$tree" ./linked                   # nor an action.yml that is a symlink
 t not_ok "$tree" ./missing
 t not_ok "100644 a1 dir/action.yml" ./      # no action.yml at the root
+
+# file_sha: a missing file is empty (gh prints the 404 JSON body on stdout), only a 40-hex sha counts
+fsha() { PATH="$PWD/tests/fake-gh:$PATH" OWNER=o FAKE_CONTENTS=${2:-} file_sha a "$1" chore/x; }
+t test -z "$(fsha .github/workflows/pr-title.yml)"
+t test "$(fsha x.yml 0123456789abcdef0123456789abcdef01234567)" = 0123456789abcdef0123456789abcdef01234567
+t test -z "$(fsha x.yml not-a-sha)"
 
 # the dependabot helpers print "<entries> <failing entries>" for each fixture
 counts() { t test "$("$1" < "$2")" = "$3"; }
@@ -135,6 +142,15 @@ done
 # the repo list at its limit may be cut: a broken run
 rc=0; PATH="$PWD/tests/fake-gh:$PATH" GH_TOKEN=x OWNER=o FAKE_LIST_N=1000 scripts/sync.sh audit >/dev/null 2>"$err" || rc=$?
 t test "$rc" = 2; t grep -q 'repo list reached its limit' "$err"
+
+# the standard stale workflow: missing and drifted copies fail the `stale` check, the byte-equal copy passes
+stale() { PATH="$PWD/tests/fake-gh:$PATH" GH_TOKEN=x FAKE_GH=stale FAKE_PATH=.github/workflows/stale.yml FAKE_STALE_FILE=${1:-} OWNER=o scripts/sync.sh audit --json r 2>/dev/null || true; }
+stale_is() { jq -e --argjson want "$1" '.[0].checks.stale | .pass == $want' <<<"$2" >/dev/null; }
+t stale_is false "$(stale)"
+t stale_is true "$(stale standard/workflows/stale.yml)"
+drift=$(mktemp); sed 's/days-before-pr-stale: 30/days-before-pr-stale: 60/' standard/workflows/stale.yml > "$drift"
+t stale_is false "$(stale "$drift")"
+rm -f "$drift"
 
 [ "$fail" = 0 ] && echo "sync.sh helpers and exit codes: ok"
 exit "$fail"

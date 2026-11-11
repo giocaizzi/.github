@@ -7,8 +7,11 @@
 #                      Blobs are served only by the sha the tree lists: `action` or `workflow`, `extra`, `forbidden`.
 #   FAKE_PRIV=false    a public repo (default private)
 #   FAKE_GQL=<json>    the GraphQL `repository` object (default: only squashMergeAllowed, so the other keys read null)
+#   FAKE_CONTENTS=<sha> the contents sha lookup of an apply mode (default: HTTP 404 with its JSON body on stdout)
 #   FAKE_PROBE=403|ok  the vulnerability-alerts, automated-security-fixes and private-vulnerability-reporting probes
 #                      (default HTTP 404: disabled)
+#   FAKE_GH=stale      the tree holds .github/workflows/stale.yml with the contents of FAKE_STALE_FILE (its blob sha),
+#                      or no file when FAKE_STALE_FILE is unset
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 case ${1:-} in
@@ -34,9 +37,17 @@ case $path in
         def extra: if endswith(".forbidden") then "forbidden" else "extra" end;
         {truncated: false, tree: ([{type: "blob", mode: "100644", sha: ($p | sha), path: $p}]
           + [$e | split(",")[] | select(length > 0) | {type: "blob", mode: "100644", sha: extra, path: .}])}')
+    elif [ "${FAKE_GH:-}" = stale ]; then
+      if [ -n "${FAKE_STALE_FILE:-}" ]; then
+        json=$(jq -cn --arg s "$(git hash-object "$FAKE_STALE_FILE")" '{truncated: false, tree: [{type: "blob", mode: "100644", sha: $s, path: ".github/workflows/stale.yml"}]}')
+      else json='{"truncated":false,"tree":[]}'; fi
     else json='{"truncated":true,"tree":[]}'; fi ;;
   repos/*/r/git/blobs/*)
-    case ${path##*/} in
+    sha=${path##*/}
+    if [ "${FAKE_GH:-}" = stale ] && [ -n "${FAKE_STALE_FILE:-}" ] && [ "$sha" = "$(git hash-object "$FAKE_STALE_FILE")" ]; then
+      cat "$FAKE_STALE_FILE"; exit 0
+    fi
+    case $sha in
       forbidden) echo "gh: Resource not accessible by personal access token (HTTP 403)" >&2; exit 1 ;;
       action) cat "$here/bad-action.yml" ;;
       workflow) cat "$here/bad-workflow.yml" ;;
@@ -44,6 +55,11 @@ case $path in
       *) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
     esac
     exit 0 ;;
+  repos/*/contents/*) # an apply mode's sha lookup; like the real gh, a 404 prints its JSON body on stdout
+    case ${FAKE_CONTENTS:-missing} in
+      missing) echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+      *) json=$(jq -cn --arg s "$FAKE_CONTENTS" '{sha: $s}') ;;
+    esac ;;
   repos/*/r/rulesets) json='[]' ;;
   repos/*/r/vulnerability-alerts|repos/*/r/automated-security-fixes|repos/*/r/private-vulnerability-reporting)
     case ${FAKE_PROBE:-} in

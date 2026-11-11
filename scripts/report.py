@@ -212,8 +212,8 @@ def collect(repos: list[tuple[str, dict[str, Any]]]) -> Findings:
 def render(data: list[dict[str, Any]], head: str, *, with_tooling: bool, keep: int) -> str:
     """The issue body; `keep` caps the rows of both tables together (drift first)."""
     private = sorted((r for r in data if r.get("private")), key=lambda r: r["repo"])
-    names = {r["repo"]: f"private repo {i}" for i, r in enumerate(private, 1)}
-    repos = [(names.get(r["repo"], r["repo"]), r) for r in data]
+    names: dict[str, str] = {str(r["repo"]): f"private repo {i}" for i, r in enumerate(private, 1)}
+    repos = [(names.get(str(r["repo"]), str(r["repo"])), r) for r in data]
     f = collect(repos)
     ok = len(repos) - len(f.bad | f.blind)
     summary = f"{len(repos)} repos checked, {len(f.bad)} drifted, {len(f.blind)} with unknown checks, {ok} ok."

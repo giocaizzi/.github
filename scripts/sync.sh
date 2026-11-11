@@ -156,6 +156,13 @@ dependabot_unprefixed() {
         if (v ~ /^(feat|fix|perf|refactor|revert|docs|style|test|build|ci|chore)(\([a-z0-9._\/-]+\))?$/) p[n]=1}}
     END {for (i = 1; i <= n; i++) if (!p[i]) b++; print n+0, b+0}'
 }
+# the blob sha of file $2 (a repo path) on ref $3 in repo $1, or nothing when it does not exist or cannot be read:
+# `gh api` prints the error body (e.g. the 404 JSON) on stdout, so only a 40-hex sha counts
+file_sha() {
+  local out
+  out=$(gh api "repos/$OWNER/$1/contents/$(uri "$2")?ref=$(uri "$3")" -q .sha </dev/null 2>/dev/null) || return 0
+  if [[ $out =~ ^[0-9a-f]{40}$ ]]; then echo "$out"; fi
+}
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by scripts/test-sync.sh for the helpers above
 
 
@@ -238,7 +245,7 @@ if [ "$mode" = apply ]; then
         changed=0
         for f in "$DIR"/standard/workflows/*.yml; do
           path=.github/workflows/$(basename "$f")
-          cur=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -q .sha 2>/dev/null || true)
+          cur=$(file_sha "$r" "$path" "$branch")
           [ "$cur" = "$(git hash-object "$f")" ] && continue
           new=$(cat "$f")
           if [ -n "$cur" ]; then
@@ -268,7 +275,7 @@ if [ "$mode" = apply ]; then
         branch=chore/standard-gitignore
         gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
         new=$(printf '%s\n\n%s\n%s\n' "${body%$'\n'}" "$(head -1 "$DIR/standard/gitignore-agents")" "$missing" | sed '/./,$!d')
-        fsha=$(gh api "repos/$OWNER/$r/contents/.gitignore?ref=$branch" -q .sha 2>/dev/null || true)
+        fsha=$(file_sha "$r" .gitignore "$branch")
         gh api -X PUT "repos/$OWNER/$r/contents/.gitignore" -f branch="$branch" -f message="chore: ignore local agent state" \
           -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${fsha:+-f sha="$fsha"} >/dev/null
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: ignore local agent state" \
@@ -286,7 +293,7 @@ if [ "$mode" = apply ]; then
         branch=chore/standard-agents-md
         gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
         while IFS= read -r f; do
-          fsha=$(gh api "repos/$OWNER/$r/contents/$(uri "$f")?ref=$branch" -q .sha 2>/dev/null) || continue
+          fsha=$(file_sha "$r" "$f" "$branch"); [ -n "$fsha" ] || continue
           gh api -X DELETE "repos/$OWNER/$r/contents/$(uri "$f")" -f branch="$branch" -f message="chore: drop the $f symlink" -f sha="$fsha" >/dev/null
         done <<<"$links"
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: drop the CLAUDE.md symlinks" \
@@ -441,7 +448,7 @@ for r in "${repos[@]}"; do
     hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | label_lines "${f#.github/workflows/}")$'\n'
   done < <(grep -E "$WF_RE|^(.*/)?action\.ya?ml\$" <<<"$paths")
   broken_exit
-  for w in pr-title label-guard todo-issues; do
+  for w in pr-title label-guard todo-issues stale; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
     # byte-equal, or equal but for refs that are each a SHA verified against its version tag (a Dependabot bump)
     same=$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")

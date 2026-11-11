@@ -1,0 +1,61 @@
+name: Stale
+
+# Copied verbatim into every repo by `sync.sh apply workflows`.
+# Marks idle PRs (30 days) and issues (90 days) `stale` and closes them 14 and 30 days later; any activity resets the clock.
+# Exempt: labels `keep` and `security`, release-please and Dependabot PRs, milestoned issues, pinned issues.
+# `actions/stale` has no input for pinned issues, so the first step labels them `keep`.
+# Branches of closed PRs are not deleted here (`delete-branch: false`): the agents' branch sweep removes them later.
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Label pinned issues keep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ github.event.repository.name }}
+          REPO: ${{ github.repository }}
+        run: |
+          # a failed query or label is logged, never fatal: the stale step still runs
+          # shellcheck disable=SC2016 # $o and $n are GraphQL variables
+          query='query($o: String!, $n: String!) { repository(owner: $o, name: $n) { pinnedIssues(first: 10) { nodes { issue { number } } } } }'
+          if ! pinned=$(gh api graphql -f o="$OWNER" -f n="$NAME" -f query="$query" -q '.data.repository.pinnedIssues.nodes[].issue.number'); then
+            echo "::warning::Could not list pinned issues; they are not exempted from the stale check this run"
+            exit 0
+          fi
+          for n in $pinned; do
+            gh issue edit "$n" --add-label keep -R "$REPO" >/dev/null || echo "::warning::Could not label pinned issue #$n keep"
+          done
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-pr-stale: 30
+          days-before-pr-close: 14
+          days-before-issue-stale: 90
+          days-before-issue-close: 30
+          stale-pr-label: stale
+          stale-issue-label: stale
+          exempt-pr-labels: 'keep,security,autorelease: pending,autorelease: tagged,dependencies'
+          exempt-issue-labels: keep,security
+          exempt-all-issue-milestones: true
+          exempt-draft-pr: false
+          remove-stale-when-updated: true
+          delete-branch: false
+          stale-pr-message: 'This pull request has had no activity for 30 days and is marked stale. It closes in 14 days unless it is updated; add the `keep` label to exempt it.'
+          close-pr-message: 'Closed after 14 days without activity since it was marked stale. Reopen it if it is still needed.'
+          stale-issue-message: 'This issue has had no activity for 90 days and is marked stale. It closes in 30 days unless it is updated; add the `keep` label to exempt it.'
+          close-issue-message: 'Closed after 30 days without activity since it was marked stale. Reopen it if it is still needed.'
