@@ -1,0 +1,11 @@
+[
+  {"repo": "zeta-secret", "type": "go", "released": false, "private": true, "exempt": [], "unknown": 0,
+   "checks": {"delete_branch": {"kind": "standard", "pass": false, "status": "fail", "detail": "delete_branch_on_merge: false (want true)"}},
+   "extras": {}, "score": {"standard": "0/1", "typed": "0/0", "extras": "0/0"}},
+  {"repo": "acme-app", "type": "go", "released": false, "private": false, "exempt": [], "unknown": 0,
+   "checks": {"delete_branch": {"kind": "standard", "pass": false, "status": "fail", "detail": "delete_branch_on_merge: false (want true)"}},
+   "extras": {}, "score": {"standard": "0/1", "typed": "0/0", "extras": "0/0"}},
+  {"repo": "alpha-secret", "type": "go", "released": false, "private": true, "exempt": [], "unknown": 0,
+   "checks": {"agents_md": {"kind": "standard", "pass": false, "detail": "no AGENTS.md"}},
+   "extras": {}, "score": {"standard": "0/1", "typed": "0/0", "extras": "0/0"}}
+]

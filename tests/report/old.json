@@ -1,0 +1,10 @@
+[
+  {"repo": "acme-app", "type": "python", "released": false, "private": false, "exempt": [],
+   "checks": {"agents_md": {"kind": "standard", "pass": false, "detail": "no AGENTS.md"},
+              "tests": {"kind": "typed", "pass": true}},
+   "extras": {"docker": {"kind": "extra", "present": false}},
+   "score": {"standard": "0/1", "typed": "1/1", "extras": "0/1"}},
+  {"repo": "acme-lib", "type": "go", "released": false, "private": false, "exempt": [],
+   "checks": {"agents_md": {"kind": "standard", "pass": true}},
+   "extras": {}, "score": {"standard": "1/1", "typed": "0/0", "extras": "0/0"}}
+]

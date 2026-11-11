@@ -1,0 +1,20 @@
+[
+  {"repo": "acme-app", "type": "python", "released": false, "private": false, "exempt": [], "unknown": 0,
+   "checks": {"agents_md": {"kind": "standard", "pass": true, "status": "pass"}},
+   "extras": {}, "score": {"standard": "1/1", "typed": "0/0", "extras": "0/0"},
+   "tooling": {
+     "uv": {"group": "common", "value": "0.11.2", "expected": "0.11.2", "status": "same", "severity": "info"},
+     "ruff": {"group": "python", "value": "0.16.0", "expected": "0.17.1", "status": "differs", "severity": "warn"},
+     "mypy": {"group": "python", "value": "", "expected": "2.4.0", "status": "absent", "severity": "fail"},
+     "pnpm": {"group": "js", "value": "", "expected": null, "status": "n.a.", "severity": "info"},
+     "golangci-lint": {"group": "go", "value": "", "expected": null, "status": "n.a.", "severity": "info"}}},
+  {"repo": "acme-lib", "type": "go", "released": false, "private": false, "exempt": [], "unknown": 1,
+   "checks": {"agents_md": {"kind": "standard", "pass": true, "status": "pass"}},
+   "extras": {}, "score": {"standard": "1/1", "typed": "0/0", "extras": "0/0"},
+   "tooling": {
+     "uv": {"group": "common", "value": "0.10.0", "expected": "0.11.2", "status": "differs", "severity": "info"},
+     "ruff": {"group": "python", "value": "", "expected": null, "status": "n.a.", "severity": "info"},
+     "mypy": {"group": "python", "value": "", "expected": null, "status": "n.a.", "severity": "info"},
+     "pnpm": {"group": "js", "value": "", "expected": null, "status": "n.a.", "severity": "info"},
+     "golangci-lint": {"group": "go", "value": "", "expected": "2.5", "status": "unknown", "severity": "fail"}}}
+]

@@ -1,0 +1,21 @@
+[
+  {"repo": "acme-app", "type": "python", "released": true, "private": false, "exempt": [], "unknown": 0,
+   "checks": {
+     "squash_only": {"kind": "standard", "pass": false, "status": "fail", "detail": "allow_merge_commit: true (want false); allow_rebase_merge: true (want false); squash_merge_commit_title: COMMIT_OR_PR_TITLE (want PR_TITLE)"},
+     "delete_branch": {"kind": "standard", "pass": false, "status": "fail", "detail": "delete_branch_on_merge: false (want true)"},
+     "labels": {"kind": "standard", "pass": false, "status": "fail", "detail": "missing: bug, feature; extra: wontfix"},
+     "agents_md": {"kind": "standard", "pass": true, "status": "pass"}
+   },
+   "extras": {"docker": {"kind": "extra", "present": false}},
+   "score": {"standard": "1/4", "typed": "0/0", "extras": "0/1"}},
+  {"repo": "acme-lib", "type": "go", "released": false, "private": false, "exempt": [], "unknown": 0,
+   "checks": {
+     "delete_branch": {"kind": "standard", "pass": false, "status": "fail", "detail": "delete_branch_on_merge: false (want true)"},
+     "agents_md": {"kind": "standard", "pass": true, "status": "pass"}
+   },
+   "extras": {},
+   "score": {"standard": "1/2", "typed": "0/0", "extras": "0/0"}},
+  {"repo": "acme-docs", "type": "docs", "released": false, "private": false, "exempt": [], "unknown": 0,
+   "checks": {"agents_md": {"kind": "standard", "pass": true, "status": "pass"}},
+   "extras": {}, "score": {"standard": "1/1", "typed": "0/0", "extras": "0/0"}}
+]

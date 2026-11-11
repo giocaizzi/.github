@@ -1,0 +1,8 @@
+[
+  {"repo": "acme-app", "type": "python", "released": false, "private": false, "exempt": [], "unknown": 0,
+   "checks": {
+     "wf_pinned": {"kind": "standard", "pass": false, "status": "fail", "detail": "ci.yml: actions/checkout@v4 is not pinned by full SHA; ci.yml: actions/checkout@v4 is not pinned by full SHA; ci.yml: actions/checkout@v4 is not pinned by full SHA; ci.yml: actions/cache@v3 is not pinned by full SHA; release.yml: owner/act1@v1 lacks a version comment; release.yml: owner/act2@v1 lacks a version comment; release.yml: owner/act3@v1 lacks a version comment; release.yml: owner/act4@v1 lacks a version comment; release.yml: owner/act5@v1 lacks a version comment; release.yml: owner/act6@v1 lacks a version comment; release.yml: owner/act7@v1 lacks a version comment; release.yml: owner/act8@v1 lacks a version comment"},
+     "wf_timeout": {"kind": "standard", "pass": false, "status": "fail", "detail": "ci.yml: job a | b has no timeout-minutes"}
+   },
+   "extras": {}, "score": {"standard": "0/2", "typed": "0/0", "extras": "0/0"}}
+]
