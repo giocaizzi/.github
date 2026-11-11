@@ -37,11 +37,15 @@ jobs:
           name: audit
           path: audit.json
           retention-days: 90
+      - name: Render the report
+        run: |
+          uv run --quiet --script scripts/report.py --date "$(date -u +%F)" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" < audit.json > report.md
+      # The report is the issue body, edited in place each run (no comments); an open issue is edited even without drift so it never goes stale
       - name: Open or update the drift issue
-        if: env.drift == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           n=$(gh issue list --label drift --state open --json number -q '.[0].number')
-          if [ -n "$n" ]; then gh issue comment "$n" --body-file audit.txt
-          else gh issue create --title "Standard drift" --label drift --body-file audit.txt; fi
+          if [ -n "$n" ]; then gh issue edit "$n" --body-file report.md
+          elif [ "${drift:-}" = 1 ]; then gh issue create --title "Standard drift" --label drift --body-file report.md; fi
