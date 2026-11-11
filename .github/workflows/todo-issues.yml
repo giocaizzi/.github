@@ -6,7 +6,8 @@ name: TODO issues
 # default branch of the two (`branches:` cannot read the default branch).
 # Bootstrap: a manual run (`gh workflow run todo-issues.yml`) imports the ones added since the first commit;
 # an issue with the same title (open or closed) is never duplicated.
-# Never write the uppercase keyword in a comment here: the action would turn that line into an issue.
+# The action matches the keyword case-insensitively after any `#`, even inside a `run:` string, so workflow files
+# are skipped (IGNORE: comma-separated regexes, each matched from the start of the repo-relative path).
 on:
   push:
     branches: [main, master]
@@ -32,6 +33,7 @@ jobs:
       - uses: alstr/todo-to-issue-action@37bb7b56e58569ef273b60678048030a7f0c261a # v5.1.15
         with:
           IDENTIFIERS: '[{"name": "TODO", "labels": ["todo"]}]'
+          IGNORE: '^\.github/workflows/'
         env:
           MANUAL_COMMIT_REF: ${{ steps.root.outputs.sha && github.sha || '' }}
           MANUAL_BASE_REF: ${{ steps.root.outputs.sha }}
