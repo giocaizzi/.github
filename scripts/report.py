@@ -48,6 +48,15 @@ WANTED = {
     "make_check": "a Makefile check target",
     "gitleaks": "gitleaks in ci.yml",
     "ci_check_job": "a ci.yml job check with needs and if: always()",
+    "pr_title": "standard/workflows/pr-title.yml (refs may differ by verified bumps)",
+    "label_guard": "standard/workflows/label-guard.yml (refs may differ by verified bumps)",
+    "todo_issues": "standard/workflows/todo-issues.yml (refs may differ by verified bumps)",
+    "todo_issues_branch": "default branch main or master",
+    "repo_type": "exactly one std-<type> topic",
+    "python_toolchain": "uv.lock, ruff, mypy and pytest",
+    "go_toolchain": "go vet, golangci-lint run, go test -race and govulncheck in ci.yml or Makefile",
+    "dependabot_grouped": "a version-update group on every updates entry",
+    "dependabot_prefix": "a Conventional Commit commit-message.prefix on every updates entry",
 }
 SETTINGS_FIX = "`scripts/sync.sh apply settings <repo>`"
 FIX = {
