@@ -4,6 +4,8 @@
 #   FAKE_GH=truncated  the repo tree is truncated
 #   FAKE_GH=files      the tree holds one blob at FAKE_PATH (bad-workflow.yml or bad-action.yml here); its contents are
 #                      served only at the percent-encoded path, as the API expects
+#   FAKE_GH=stale      the tree holds .github/workflows/stale.yml with the contents of FAKE_STALE_FILE (also FAKE_PATH),
+#                      or no file when FAKE_STALE_FILE is unset
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 case ${1:-} in
@@ -22,10 +24,15 @@ case $path in
   repos/*/r/git/trees/*)
     if [ "${FAKE_GH:-}" = files ]; then
       json=$(jq -cn --arg p "$FAKE_PATH" '{truncated: false, tree: [{type: "blob", mode: "100644", sha: "0", path: $p}]}')
+    elif [ "${FAKE_GH:-}" = stale ]; then
+      if [ -n "${FAKE_STALE_FILE:-}" ]; then
+        json=$(jq -cn --arg s "$(git hash-object "$FAKE_STALE_FILE")" '{truncated: false, tree: [{type: "blob", mode: "100644", sha: $s, path: ".github/workflows/stale.yml"}]}')
+      else json='{"truncated":false,"tree":[]}'; fi
     else json='{"truncated":true,"tree":[]}'; fi ;;
   repos/*/r/contents/*)
     want=$(jq -rn --arg p "${FAKE_PATH:-}" '$p | split("/") | map(@uri) | join("/")')
     [ "$path" = "repos/o/r/contents/$want?ref=main" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    [ "${FAKE_GH:-}" = stale ] && { cat "$FAKE_STALE_FILE"; exit 0; }
     case $FAKE_PATH in */action.yml|action.yml) cat "$here/bad-action.yml" ;; *) cat "$here/bad-workflow.yml" ;; esac
     exit 0 ;;
   *) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;

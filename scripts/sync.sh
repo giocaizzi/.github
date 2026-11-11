@@ -394,7 +394,7 @@ for r in "${repos[@]}"; do
     hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | label_lines "${f#.github/workflows/}")$'\n'
   done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$|^(.*/)?action\.ya?ml$' <<<"$paths")
   broken_exit
-  for w in pr-title label-guard todo-issues; do
+  for w in pr-title label-guard todo-issues stale; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
     # byte-equal, or equal but for refs that are each a SHA verified against its version tag (a Dependabot bump)
     same=$(ok test "$got" = "$(git hash-object "$DIR/standard/workflows/$w.yml")")

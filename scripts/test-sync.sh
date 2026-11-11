@@ -3,7 +3,8 @@
 # - local_ok: where a `./` ref may point (sourced helpers);
 # - dependabot_ungrouped / dependabot_unprefixed: grouped and ungrouped fixtures (tests/dependabot/);
 # - a missing checker lock is a crash, so nothing passes and the run is broken;
-# - an API failure and a truncated repo tree stop an audit with exit 2, never drift (tests/fake-gh/gh).
+# - an API failure and a truncated repo tree stop an audit with exit 2, never drift (tests/fake-gh/gh);
+# - the audit's `stale` check passes the standard stale workflow and fails a missing or drifted copy.
 # shellcheck disable=SC2154,SC2317,SC2329 # pin_cache and broken come from the sourced sync.sh; t() calls not_ok
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -63,6 +64,15 @@ for p in .github/workflows/bad.yml '.github/workflows/&.yml' '.github/workflows/
 done
 # a path with a control character (a newline would split it into two lines) is a broken run
 rc=0; files $'.github/workflows/a\nb.yml' >/dev/null || rc=$?; t test "$rc" = 2
+
+# the standard stale workflow: missing and drifted copies fail the `stale` check, the byte-equal copy passes
+stale() { PATH="$PWD/tests/fake-gh:$PATH" GH_TOKEN=x FAKE_GH=stale FAKE_PATH=.github/workflows/stale.yml FAKE_STALE_FILE=${1:-} OWNER=o scripts/sync.sh audit --json r 2>/dev/null || true; }
+stale_is() { jq -e --argjson want "$1" '.[0].checks.stale | .pass == $want' <<<"$2" >/dev/null; }
+t stale_is false "$(stale)"
+t stale_is true "$(stale standard/workflows/stale.yml)"
+drift=$(mktemp); sed 's/days-before-pr-stale: 30/days-before-pr-stale: 60/' standard/workflows/stale.yml > "$drift"
+t stale_is false "$(stale "$drift")"
+rm -f "$drift"
 
 [ "$fail" = 0 ] && echo "sync.sh helpers and exit codes: ok"
 exit "$fail"
