@@ -1,0 +1,170 @@
+{
+  "ci_check_job": {
+    "expected": "present",
+    "group": "common",
+    "severity": "info",
+    "status": "same",
+    "value": "present"
+  },
+  "coverage_floor": {
+    "expected": null,
+    "group": "python",
+    "severity": "info",
+    "status": "n.a.",
+    "value": "90"
+  },
+  "dependabot_groups": {
+    "expected": "all",
+    "group": "common",
+    "severity": "info",
+    "status": "same",
+    "value": "2/2"
+  },
+  "docker_pins": {
+    "expected": "all",
+    "group": "common",
+    "severity": "info",
+    "status": "same",
+    "value": "1/1"
+  },
+  "eslint": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "gitleaks": {
+    "expected": "present",
+    "group": "common",
+    "severity": "info",
+    "status": "same",
+    "value": "present"
+  },
+  "go_version": {
+    "expected": null,
+    "group": "go",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "golangci_baseline": {
+    "expected": null,
+    "group": "go",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "golangci_lint": {
+    "expected": null,
+    "group": "go",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "js_pm": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "make_targets": {
+    "expected": "help, lint, test, check",
+    "group": "common",
+    "severity": "info",
+    "status": "same",
+    "value": "help, lint, test, check"
+  },
+  "mypy": {
+    "expected": "strict",
+    "group": "python",
+    "severity": "info",
+    "status": "same",
+    "value": "strict"
+  },
+  "node_version": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "pre_commit": {
+    "expected": null,
+    "group": "common",
+    "severity": "info",
+    "status": "n.a.",
+    "value": "absent"
+  },
+  "prettier": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "pytest": {
+    "expected": null,
+    "group": "python",
+    "severity": "info",
+    "status": "n.a.",
+    "value": "pytest-cov, pytest-xdist"
+  },
+  "python_pm": {
+    "expected": "uv",
+    "group": "python",
+    "severity": "info",
+    "status": "same",
+    "value": "uv"
+  },
+  "python_version": {
+    "expected": ">=3.14",
+    "group": "python",
+    "severity": "info",
+    "status": "same",
+    "value": ">=3.14; .python-version 3.14; ci 3.14"
+  },
+  "release_tooling": {
+    "expected": "release-please",
+    "group": "common",
+    "severity": "info",
+    "status": "same",
+    "value": "release-please"
+  },
+  "ruff": {
+    "expected": "select=ALL",
+    "group": "python",
+    "severity": "info",
+    "status": "same",
+    "value": "select=ALL, ignore=2 rules, line-length=120"
+  },
+  "ruff_format": {
+    "expected": "present",
+    "group": "python",
+    "severity": "info",
+    "status": "same",
+    "value": "present"
+  },
+  "test_runner": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "tsconfig_strict": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  },
+  "typescript": {
+    "expected": null,
+    "group": "js",
+    "severity": "info",
+    "status": "n.a.",
+    "value": ""
+  }
+}

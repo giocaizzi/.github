@@ -1,0 +1,8 @@
+.github/dependabot.yml
+.github/workflows/ci.yml
+.python-version
+Dockerfile
+Makefile
+pyproject.toml
+release-please-config.json
+uv.lock

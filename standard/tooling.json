@@ -1,0 +1,30 @@
+{
+  "checks": {
+    "make_targets": { "severity": "info", "expected": "help, lint, test, check" },
+    "pre_commit": { "severity": "info" },
+    "gitleaks": { "severity": "info", "expected": "present" },
+    "dependabot_groups": { "severity": "info", "expected": "all" },
+    "ci_check_job": { "severity": "info", "expected": "present" },
+    "docker_pins": { "severity": "info", "expected": "all" },
+    "release_tooling": { "severity": "info", "expected": "release-please" },
+    "python_version": { "severity": "info", "expected": ">=3.14" },
+    "python_pm": { "severity": "info", "expected": "uv" },
+    "ruff": { "severity": "info", "expected": "select=ALL" },
+    "ruff_format": { "severity": "info", "expected": "present" },
+    "mypy": { "severity": "info", "expected": "strict" },
+    "pytest": { "severity": "info" },
+    "coverage_floor": { "severity": "info" },
+    "node_version": { "severity": "info", "expected": ">=26" },
+    "js_pm": { "severity": "info", "expected": "pnpm" },
+    "typescript": { "severity": "info", "expected": "7" },
+    "eslint": { "severity": "info", "expected": "10" },
+    "prettier": { "severity": "info", "expected": "present" },
+    "tsconfig_strict": { "severity": "info", "expected": "strict" },
+    "test_runner": { "severity": "info", "expected": "vitest" },
+    "go_version": { "severity": "info", "expected": ">=1.26" },
+    "golangci_lint": { "severity": "info", "expected": "v2" },
+    "golangci_baseline": { "severity": "info" }
+  },
+  "repos": {},
+  "ignore": { "repos": [], "checks": [] }
+}

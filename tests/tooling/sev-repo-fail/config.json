@@ -1,0 +1,7 @@
+{
+  "checks": { "python_pm": { "severity": "warn" } },
+  "repos": {
+    "old-app": { "checks": { "python_pm": { "severity": "fail" }, "ruff": { "expected": "select=E,F,I" } } },
+    "other-app": { "checks": { "python_pm": { "severity": "info", "expected": "pip" } } }
+  }
+}

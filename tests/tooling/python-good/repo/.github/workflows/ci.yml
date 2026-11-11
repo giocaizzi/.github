@@ -1,0 +1,19 @@
+name: ci
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.14"]
+    steps:
+      - uses: actions/checkout@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v7.1.0
+      - uses: astral-sh/setup-uv@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v8.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: gitleaks detect
+  check:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - run: make check

@@ -1,0 +1,13 @@
+name: ci
+on: [pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [26]
+    steps:
+      - uses: actions/setup-node@dddddddddddddddddddddddddddddddddddddddd # v6.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: pnpm test
