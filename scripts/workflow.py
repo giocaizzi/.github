@@ -23,14 +23,20 @@ and `image` refs are checked.
 
 from __future__ import annotations
 
+import math
+import operator
 import re
 import sys
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.events import CollectionStartEvent, DocumentStartEvent, ScalarEvent
 from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 STR = "tag:yaml.org,2002:str"
 INT = "tag:yaml.org,2002:int"
@@ -43,12 +49,10 @@ REMOTE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+(/[^@\s\\]+)?@[0-9a-f]{40}") 
 DOCKER = re.compile(r"docker://[^@\s]+@sha256:[0-9a-f]{64}")
 LOCAL = re.compile(r"\./[^\s\x00-\x1f\x7f\\]*")
 VERSION = re.compile(r"\s+#\s*(v?[0-9]+(?:\.[0-9]+)*)\s*")
-EXPR = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 # A group keeps push, merge_group and reusable runs apart only when github.run_id is the value of one of its
 # expressions: `${{ github.run_id }}`, or the documented
 # `${{ github.event_name == 'pull_request' && <ctx> || github.run_id }}`. `github.ref || github.run_id` (the ref is
 # always set) or `'github.run_id'` (a string) do not count.
-EXPRESSIONS = re.compile(r"\$\{\{([^}]*)\}\}")
 RUN_ID_VALUES = (
     re.compile(r"github\.run_id"),
     re.compile(
@@ -61,14 +65,272 @@ PR_EVENTS = {"pull_request", "pull_request_target"}
 # event may be one of them
 GUARDED_EVENTS = {"push", "merge_group", "workflow_call"}
 MINUTES = re.compile(r"[1-9][0-9]*")  # plain decimal: YAML 1.2 core reads `1_0`, `0b101`, `0x_1` as strings
-ONE_EXPR = re.compile(r"\$\{\{([^}]*)\}\}")
-# an expression that reads no context is a constant (numbers in any form: hex, exponent, ...; strings; literals)
-CONTEXT = re.compile(r"\b(github|env|vars|inputs|matrix|needs|strategy|steps|job|jobs|runner|secrets)\b")
 IMAGE = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
 
 
 class UnreadableError(Exception):
     """The file is outside what this checker reads; reported as `wf_parsed`."""
+
+
+def string_end(value: str, start: int) -> int:
+    """Return the index of the quote that closes the string literal opened at `start`; `''` is an escaped quote."""
+    i = start + 1
+    while i < len(value):
+        if value[i] == "'":
+            if value[i + 1 : i + 2] != "'":
+                return i
+            i += 1
+        i += 1
+    msg = "unterminated ${{ expression"
+    raise UnreadableError(msg)
+
+
+def expression_end(value: str, start: int) -> int:
+    """Return the index of the `}}` that ends the expression whose body starts at `start`, skipping string literals."""
+    i = start
+    while not value.startswith("}}", i):
+        if i >= len(value):
+            msg = "unterminated ${{ expression"
+            raise UnreadableError(msg)
+        i = string_end(value, i) + 1 if value[i] == "'" else i + 1
+    return i
+
+
+def split_template(value: str) -> list[tuple[bool, str]]:
+    """Split a scalar into (is_expression, text) parts the way the Actions runner reads a template.
+
+    An expression opens at `${{` and ends at the first `}}` outside a single-quoted string literal (`''` is an
+    escaped quote); an expression that never ends makes the file unreadable.
+    """
+    parts: list[tuple[bool, str]] = []
+    pos = 0
+    while (start := value.find("${{", pos)) >= 0:
+        if start > pos:
+            parts.append((False, value[pos:start]))
+        end = expression_end(value, start + 3)
+        parts.append((True, value[start + 3 : end]))
+        pos = end + 2
+    if pos < len(value):
+        parts.append((False, value[pos:]))
+    return parts
+
+
+class ExprSyntaxError(Exception):
+    """An expression the small parser below cannot read."""
+
+
+class Unknown:
+    """The value of a constant expression this checker does not compute."""
+
+
+UNKNOWN = Unknown()
+Value = bool | float | str | None | Unknown
+# (is the expression constant, its value)
+Result = tuple[bool, Value]
+TOKEN = re.compile(
+    r"""\s*(?:
+    (?P<num>-?(?:0[xX][0-9a-fA-F]+|(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?))
+    |(?P<str>'(?:[^']|'')*')
+    |(?P<id>[A-Za-z_][A-Za-z0-9_-]*)
+    |(?P<op>&&|\|\||==|!=|<=|>=|\.\*|[!<>().,\[\]])
+    )""",
+    re.VERBOSE,
+)
+# never constant: their result depends on the run
+RUNTIME_FUNCTIONS = {"success", "always", "failure", "cancelled", "hashfiles"}
+
+
+COMPARISONS: dict[str, Callable[[Any, Any], bool]] = {
+    "==": operator.eq,
+    "!=": operator.ne,
+    "<": operator.lt,
+    "<=": operator.le,
+    ">": operator.gt,
+    ">=": operator.ge,
+}
+
+
+def truthy(value: Value) -> bool | None:
+    """Return the GitHub truthiness of a value, or None when it is not known."""
+    if isinstance(value, Unknown):
+        return None
+    if isinstance(value, float):
+        return not (value == 0 or math.isnan(value))
+    return bool(value)
+
+
+def compare(op: str, left: Value, right: Value) -> Value:
+    """Return the result of a comparison of two values of the same type, else UNKNOWN."""
+    if isinstance(left, Unknown) or isinstance(right, Unknown) or type(left) is not type(right):
+        return UNKNOWN
+    if left is None or right is None or isinstance(left, bool) or isinstance(right, bool):
+        return (left == right) if op == "==" else (left != right) if op == "!=" else UNKNOWN
+    if isinstance(left, str) and isinstance(right, str):
+        return COMPARISONS[op](left.casefold(), right.casefold())
+    if isinstance(left, float) and isinstance(right, float):
+        return COMPARISONS[op](left, right)
+    return UNKNOWN
+
+
+class Parser:
+    """Recursive-descent parser and evaluator of the Actions expression grammar, down to constant or not."""
+
+    def __init__(self, source: str) -> None:
+        """Split the source into tokens."""
+        self.tokens: list[tuple[str, str]] = []
+        pos = 0
+        source = source.rstrip()
+        while pos < len(source):
+            match = TOKEN.match(source, pos)
+            if match is None or match.end() == pos:
+                msg = f"unreadable expression at {source[pos:]!r}"
+                raise ExprSyntaxError(msg)
+            kind = str(match.lastgroup)
+            self.tokens.append((kind, match.group(kind)))
+            pos = match.end()
+        self.pos = 0
+
+    def peek(self) -> str | None:
+        """Return the next operator or None."""
+        if self.pos < len(self.tokens) and self.tokens[self.pos][0] == "op":
+            return self.tokens[self.pos][1]
+        return None
+
+    def take(self, op: str) -> bool:
+        """Consume the operator when it is next."""
+        if self.peek() == op:
+            self.pos += 1
+            return True
+        return False
+
+    def expect(self, op: str) -> None:
+        """Consume the operator or fail."""
+        if not self.take(op):
+            msg = f"expected {op!r}"
+            raise ExprSyntaxError(msg)
+
+    def parse(self) -> Result:
+        """Parse the whole expression."""
+        result = self.or_()
+        if self.pos != len(self.tokens):
+            msg = "trailing tokens"
+            raise ExprSyntaxError(msg)
+        return result
+
+    def logic(self, op: str, operand: Callable[[], Result]) -> Result:
+        """Parse `operand (op operand)*` for `&&` or `||` and evaluate it with short-circuiting."""
+        operands = [operand()]
+        while self.take(op):
+            operands.append(operand())
+        result = operands[-1]
+        for left in reversed(operands[:-1]):
+            result = self.short_circuit(op, left, result)
+        return result
+
+    @staticmethod
+    def short_circuit(op: str, left: Result, right: Result) -> Result:
+        """Combine `left op right`; op is `&&` or `||`."""
+        if not left[0]:
+            return False, UNKNOWN
+        decided = truthy(left[1])
+        if decided is None:
+            return (True, UNKNOWN) if right[0] else (False, UNKNOWN)
+        return left if decided == (op == "||") else right
+
+    def or_(self) -> Result:
+        """Parse `||`."""
+        return self.logic("||", self.and_)
+
+    def and_(self) -> Result:
+        """Parse `&&`."""
+        return self.logic("&&", self.equality)
+
+    def binary(self, ops: tuple[str, ...], operand: Callable[[], Result]) -> Result:
+        """Parse a left-associative comparison level."""
+        left = operand()
+        while (op := self.peek()) in ops:
+            self.pos += 1
+            right = operand()
+            left = (True, compare(str(op), left[1], right[1])) if left[0] and right[0] else (False, UNKNOWN)
+        return left
+
+    def equality(self) -> Result:
+        """Parse `==` and `!=`."""
+        return self.binary(("==", "!="), self.comparison)
+
+    def comparison(self) -> Result:
+        """Parse `<`, `<=`, `>` and `>=`."""
+        return self.binary(("<", "<=", ">", ">="), self.unary)
+
+    def unary(self) -> Result:
+        """Parse `!`."""
+        if self.take("!"):
+            const, value = self.unary()
+            decided = truthy(value)
+            return const, UNKNOWN if not const or decided is None else not decided
+        return self.postfix()
+
+    def postfix(self) -> Result:
+        """Parse `.prop`, `.*` and `[expr]` accesses."""
+        const, value = self.primary()
+        while True:
+            if self.take(".*"):
+                pass
+            elif self.take("."):
+                if self.pos >= len(self.tokens) or self.tokens[self.pos][0] != "id":
+                    msg = "expected a property name"
+                    raise ExprSyntaxError(msg)
+                self.pos += 1
+            elif self.take("["):
+                index = self.or_()
+                self.expect("]")
+                const = const and index[0]
+            else:
+                return const, value
+            value = UNKNOWN
+
+    def primary(self) -> Result:
+        """Parse a literal, a context, a call or a parenthesised expression."""
+        if self.take("("):
+            result = self.or_()
+            self.expect(")")
+            return result
+        if self.pos >= len(self.tokens):
+            msg = "unexpected end"
+            raise ExprSyntaxError(msg)
+        kind, token = self.tokens[self.pos]
+        self.pos += 1
+        if kind == "num":
+            return True, float(int(token, 16)) if "x" in token.lower() else float(token)
+        if kind == "str":
+            return True, token[1:-1].replace("''", "'")
+        if kind != "id":
+            msg = f"unexpected {token!r}"
+            raise ExprSyntaxError(msg)
+        word = token.lower()
+        if self.peek() == "(":
+            return self.call(word)
+        literals: dict[str, Value] = {"true": True, "false": False, "null": None, "nan": math.nan, "infinity": math.inf}
+        if word in literals:
+            return True, literals[word]
+        return False, UNKNOWN  # a context
+
+    def call(self, name: str) -> Result:
+        """Parse the arguments of a function call; it is constant when they all are."""
+        self.expect("(")
+        constant = name not in RUNTIME_FUNCTIONS
+        if not self.take(")"):
+            while True:
+                constant = self.or_()[0] and constant
+                if self.take(")"):
+                    break
+                self.expect(",")
+        return constant, UNKNOWN
+
+
+def evaluate(source: str) -> Result:
+    """Return whether an expression body is constant and its value; raise ExprSyntaxError when unreadable."""
+    return Parser(source).parse()
 
 
 def tag(node: Node) -> str:
@@ -119,9 +381,13 @@ def is_true(node: Node) -> bool:
     if tag(node) == BOOL:
         return str(node.value).lower() == "true"
     value = str(node.value).strip()
-    match = EXPR.fullmatch(value)
-    if match:
-        value = match.group(1).strip().strip("'\"")
+    parts = split_template(value)
+    if len(parts) == 1 and parts[0][0]:  # one expression is the whole value: a constant one that is not falsy is true
+        try:
+            const, result = evaluate(parts[0][1])
+        except ExprSyntaxError:
+            return True  # unreadable: fail closed
+        return const and truthy(result) is not False
     return value.lower() in {"true", "yes", "on"}
 
 
@@ -202,7 +468,7 @@ class Checker:
             raise UnreadableError(msg)
         if not guarded:
             return
-        values = [" ".join(e.split()) for e in EXPRESSIONS.findall(text(group) or "")]
+        values = [" ".join(body.split()) for is_expr, body in split_template(text(group) or "") if is_expr]
         if not any(pattern.fullmatch(v) for v in values for pattern in RUN_ID_VALUES):
             self.bad(
                 "wf_concurrency",
@@ -304,11 +570,13 @@ def positive_minutes(node: Node | None) -> bool:
         return False
     if tag(node) == INT:
         return bool(MINUTES.fullmatch(str(node.value)))
-    match = ONE_EXPR.fullmatch(text(node) or "")
-    if match is None:
+    parts = split_template(text(node) or "")
+    if len(parts) != 1 or not parts[0][0]:
         return False
-    body = re.sub(r"'([^']|'')*'", "", match.group(1))  # a context name inside a string literal does not count
-    return bool(CONTEXT.search(body))
+    try:
+        return not evaluate(parts[0][1])[0]
+    except ExprSyntaxError:
+        return False
 
 
 def check_mappings(node: Node, seen: set[int]) -> None:

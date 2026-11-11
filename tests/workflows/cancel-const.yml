@@ -1,0 +1,257 @@
+# constant cancel-in-progress expressions on a push run: flagged unless known falsy; expected: cancel-const.out
+on: push
+permissions:
+  contents: read
+jobs:
+  # !false
+  c1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ !false }}
+    steps:
+      - run: echo
+  # 1
+  c2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ 1 }}
+    steps:
+      - run: echo
+  # 'x'
+  c3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ 'x' }}
+    steps:
+      - run: echo
+  # true || github.x
+  c4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ true || github.x }}
+    steps:
+      - run: echo
+  # TRUE
+  c5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ TRUE }}
+    steps:
+      - run: echo
+  # True
+  c6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ True }}
+    steps:
+      - run: echo
+  # NULL || 1
+  c7:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ NULL || 1 }}
+    steps:
+      - run: echo
+  # false || 'x'
+  c8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ false || 'x' }}
+    steps:
+      - run: echo
+  # !(0)
+  c9:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ !(0) }}
+    steps:
+      - run: echo
+  # github.x || true
+  c10:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ github.x || true }}
+    steps:
+      - run: echo
+  # fromJSON('1')
+  c11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ fromJSON('1') }}
+    steps:
+      - run: echo
+  # success()
+  c12:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ success() }}
+    steps:
+      - run: echo
+  # 'it''s'
+  c13:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ 'it''s' }}
+    steps:
+      - run: echo
+  # !!
+  c14:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ !! }}
+    steps:
+      - run: echo
+  # false
+  c15:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ false }}
+    steps:
+      - run: echo
+  # !true
+  c16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ !true }}
+    steps:
+      - run: echo
+  # FALSE
+  c17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ FALSE }}
+    steps:
+      - run: echo
+  # null
+  c18:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ null }}
+    steps:
+      - run: echo
+  # 0
+  c19:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ 0 }}
+    steps:
+      - run: echo
+  # ''
+  c20:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ '' }}
+    steps:
+      - run: echo
+  # -0
+  c21:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ -0 }}
+    steps:
+      - run: echo
+  # 0x0
+  c22:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ 0x0 }}
+    steps:
+      - run: echo
+  # true && false
+  c23:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ true && false }}
+    steps:
+      - run: echo
+  # false && github.x
+  c24:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ false && github.x }}
+    steps:
+      - run: echo
+  # github.event_name == 'pull_request'
+  c25:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - run: echo
+  # github.x && true
+  c26:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ github.x && true }}
+    steps:
+      - run: echo
+  # 1 == 1
+  c27:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ 1 == 1 }}
+    steps:
+      - run: echo
+  # !0 == 1
+  c28:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+      cancel-in-progress: ${{ !0 == 1 }}
+    steps:
+      - run: echo
