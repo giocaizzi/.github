@@ -1,0 +1,5 @@
+[
+  {"repo": "acme-app", "type": "python", "released": false, "private": false, "exempt": [], "unknown": 0,
+   "checks": {"agents_md": {"kind": "standard", "pass": true, "status": "pass"}},
+   "extras": {}, "score": {"standard": "1/1", "typed": "0/0", "extras": "0/0"}}
+]

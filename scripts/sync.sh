@@ -15,9 +15,10 @@ pin_cache=$(mktemp) broken=$(mktemp) # `<owner/repo> <tag> <commit>` per tag loo
 # a GitHub API call) is a broken run and becomes exit 2, which audit.yml never reads as drift.
 on_exit() {
   local rc=$?
-  rm -f "$pin_cache" "$broken" "$broken.last"
+  rm -f "$pin_cache" "$broken" "$broken.last"; rm -rf "${tooldir:-}"
   if [ "$rc" = 1 ] && [ -z "${finished:-}" ]; then echo "run broken (not drift): a command failed (see above)" >&2; exit 2; fi
 }
+tooldir=
 finished= # never read from the environment: an inherited value must not turn a broken run into drift
 trap on_exit EXIT
 finish() { finished=1; exit "$1"; }
@@ -70,15 +71,19 @@ wf_out() {
   out=$(wf_check "$@") || { echo "scripts/workflow.py failed (exit $?)" >> "$broken"; printf 'wf_parsed\tscripts/workflow.py failed\n'; return 0; }
   [ -z "$out" ] || printf '%s\n' "$out"
 }
+# the workflow files the audit scans: every direct child of .github/workflows/ named *.yml or *.yaml in any case,
+# an empty stem included (fail closed: checking an extra file is harmless)
+WF_RE='^\.github/workflows/[^/]*\.([yY][mM][lL]|[yY][aA][mM][lL])$'
 # whether `./` ref $2 points at a regular file in the repo tree $1 (`<mode> <sha> <path>` lines): an action.yml or
-# action.yaml in that directory (the repo root for `./`), or the file itself (a local reusable workflow). A symlink
-# never counts: its target is not what the audit scanned. The path goes through ENVIRON, which awk does not unescape.
+# action.yaml in that directory (the repo root for `./`), or a local reusable workflow, which must be a file the
+# audit scans (WF_RE). A symlink never counts: its target is not what the audit scanned. The path goes through
+# ENVIRON, which awk does not unescape.
 local_ok() {
   local p=${2#./}
   p=${p%/}
   P=$p awk 'BEGIN {p = ENVIRON["P"]; d = (p == "" ? "" : p "/")}
     {m = $1; path = $0; sub(/^[^ ]+ [^ ]+ /, "", path)
-     if ((m == "100644" || m == "100755") && ((p != "" && path == p) || path == d "action.yml" || path == d "action.yaml")) f = 1}
+     if ((m == "100644" || m == "100755") && ((p != "" && path == p && tolower(path) ~ /^\.github\/workflows\/[^\/]*\.ya?ml$/) || path == d "action.yml" || path == d "action.yaml")) f = 1}
     END {exit !f}' <<<"$1"
 }
 # hygiene findings of the workflow on stdin (with $2 = --action: an action.yml), `<id>\t<detail>`: the checker's,
@@ -97,7 +102,7 @@ wf_findings() {
           *) printf 'wf_pinned\t%s@%s is not %s upstream (tag is %s)\n' "$a" "$b" "$c" "$got" ;;
         esac ;;
       local)
-        local_ok "${1:-}" "$a" || printf 'wf_pinned\tlocal ref %s: no action.yml or workflow file at that path in the repo\n' "$a" ;;
+        local_ok "${1:-}" "$a" || printf 'wf_pinned\tlocal ref %s: no action.yml or scanned workflow file at that path in the repo\n' "$a" ;;
     esac
   done <<<"$out"
 }
@@ -151,6 +156,13 @@ dependabot_unprefixed() {
         if (v ~ /^(feat|fix|perf|refactor|revert|docs|style|test|build|ci|chore)(\([a-z0-9._\/-]+\))?$/) p[n]=1}}
     END {for (i = 1; i <= n; i++) if (!p[i]) b++; print n+0, b+0}'
 }
+# the blob sha of file $2 (a repo path) on ref $3 in repo $1, or nothing when it does not exist or cannot be read:
+# `gh api` prints the error body (e.g. the 404 JSON) on stdout, so only a 40-hex sha counts
+file_sha() {
+  local out
+  out=$(gh api "repos/$OWNER/$1/contents/$(uri "$2")?ref=$(uri "$3")" -q .sha </dev/null 2>/dev/null) || return 0
+  if [[ $out =~ ^[0-9a-f]{40}$ ]]; then echo "$out"; fi
+}
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0 # sourced by scripts/test-sync.sh for the helpers above
 
 
@@ -178,9 +190,14 @@ while [ "$mode" = audit ] && [ $# -gt 0 ]; do
 done
 case $vis in public|private|all) ;; *) echo "--visibility: public|private|all" >&2; exit 2 ;; esac
 repos=("$@")
-[ ${#repos[@]} -gt 0 ] || while IFS= read -r r; do repos+=("$r"); done < <(
-  gh repo list "$OWNER" --no-archived --source --limit 200 --json name,visibility \
-    | jq -r --arg v "$vis" '.[] | select($v == "all" or (.visibility | ascii_downcase) == $v) | .name' | grep -vx '.github')
+if [ ${#repos[@]} -eq 0 ]; then
+  limit=1000
+  listing=$(gh repo list "$OWNER" --no-archived --source --limit "$limit" --json name,visibility)
+  # a result as long as the limit may have been cut: the scope would silently drop repos
+  [ "$(jq length <<<"$listing")" -lt "$limit" ] || { echo "repo list reached its limit ($limit): the scope may be cut, raise --limit" >&2; exit 2; }
+  while IFS= read -r r; do repos+=("$r"); done < <(
+    jq -r --arg v "$vis" '.[] | select($v == "all" or (.visibility | ascii_downcase) == $v) | .name' <<<"$listing" | grep -vx '.github' || true)
+fi
 # Fail loudly instead of passing on an empty scope (e.g. a missing or under-scoped token).
 [ ${#repos[@]} -gt 0 ] || { echo "no repos to check: is GH_TOKEN set and allowed to list repos?" >&2; exit 2; }
 
@@ -228,7 +245,7 @@ if [ "$mode" = apply ]; then
         changed=0
         for f in "$DIR"/standard/workflows/*.yml; do
           path=.github/workflows/$(basename "$f")
-          cur=$(gh api "repos/$OWNER/$r/contents/$path?ref=$branch" -q .sha 2>/dev/null || true)
+          cur=$(file_sha "$r" "$path" "$branch")
           [ "$cur" = "$(git hash-object "$f")" ] && continue
           new=$(cat "$f")
           if [ -n "$cur" ]; then
@@ -258,7 +275,7 @@ if [ "$mode" = apply ]; then
         branch=chore/standard-gitignore
         gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
         new=$(printf '%s\n\n%s\n%s\n' "${body%$'\n'}" "$(head -1 "$DIR/standard/gitignore-agents")" "$missing" | sed '/./,$!d')
-        fsha=$(gh api "repos/$OWNER/$r/contents/.gitignore?ref=$branch" -q .sha 2>/dev/null || true)
+        fsha=$(file_sha "$r" .gitignore "$branch")
         gh api -X PUT "repos/$OWNER/$r/contents/.gitignore" -f branch="$branch" -f message="chore: ignore local agent state" \
           -f content="$(printf '%s\n' "$new" | base64 | tr -d '\n')" ${fsha:+-f sha="$fsha"} >/dev/null
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: ignore local agent state" \
@@ -276,8 +293,8 @@ if [ "$mode" = apply ]; then
         branch=chore/standard-agents-md
         gh api "repos/$OWNER/$r/git/refs" -f ref="refs/heads/$branch" -f sha="$sha" >/dev/null 2>&1 || true
         while IFS= read -r f; do
-          fsha=$(gh api "repos/$OWNER/$r/contents/$f?ref=$branch" -q .sha 2>/dev/null) || continue
-          gh api -X DELETE "repos/$OWNER/$r/contents/$f" -f branch="$branch" -f message="chore: drop the $f symlink" -f sha="$fsha" >/dev/null
+          fsha=$(file_sha "$r" "$f" "$branch"); [ -n "$fsha" ] || continue
+          gh api -X DELETE "repos/$OWNER/$r/contents/$(uri "$f")" -f branch="$branch" -f message="chore: drop the $f symlink" -f sha="$fsha" >/dev/null
         done <<<"$links"
         gh pr create -R "$OWNER/$r" -B "$base" -H "$branch" --title "chore: drop the CLAUDE.md symlinks" \
           --body "Claude Code reads AGENTS.md when no CLAUDE.md exists (giocaizzi/.github docs/standard.md, Per-repo docs), so the symlinks go." >/dev/null 2>&1 || true ;;
@@ -310,14 +327,34 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
 # Helpers read the current repo's globals ($r, $paths, $entries, $m, ...).
 # shellcheck disable=SC2317,SC2329 # job_ok etc. are invoked through ok()
 {
-  chk() { local d=${4:-}; d=${d//[$'\t\n\r']/ }; rec+="$1	$2	$3	$d"$'\n'; } # id kind pass|present detail (one line)
+  # id kind pass|fail|unknown detail (one line); `true` and `false` from `ok` mean pass and fail; unknown is "cannot read",
+  # never drift
+  chk() {
+    local d=${4:-} st=$3; d=${d//[$'\t\n\r']/ }
+    case $st in true) st=pass ;; false) st=fail ;; esac
+    rec+="$1	$2	$st	$d"$'\n'
+  }
   ok() { if "$@"; then echo true; else echo false; fi; }
   has() { grep -qE "^($1)$" <<<"$paths"; }
   raw() { if grep -qxF -- "$1" <<<"$paths"; then fetch "$1"; fi; } # a file the tree lists (exact path); a failed fetch is a broken run
+  # the blob sha the tree listing ($entries) gives path $1; nothing when the tree has no such path. Files are fetched by
+  # this sha, so a push after the listing cannot mix two commits.
+  blob_sha() { P=$1 awk '{p = $0; sub(/^[^ ]+ [^ ]+ /, "", p)} p == ENVIRON["P"] {print $2; exit}' <<<"$entries"; }
   # a file the hygiene checks read: a failed fetch is a broken run (recorded), never empty input read as drift
   fetch() {
-    gh api "repos/$OWNER/$r/contents/$(uri "$1")?ref=$(uri "$base")" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
-      || echo "gh api contents/$1 ($r): $(head -1 "$broken.last")" >> "$broken"
+    local sha; sha=$(blob_sha "$1"); [ -n "$sha" ] || return 0
+    gh api "repos/$OWNER/$r/git/blobs/$sha" -H 'Accept: application/vnd.github.raw' </dev/null 2>"$broken.last" \
+      || echo "gh api git/blobs/$sha ($1, $r): $(head -1 "$broken.last")" >> "$broken"
+  }
+  # fetch path $1 of the tree into file $2 for the tooling inventory: HTTP 403 lists the path in $tooldir/.audit/unreadable
+  # (not broken), any other failure is a broken run
+  fetch_file() {
+    local sha; sha=$(blob_sha "$1")
+    [ -n "$sha" ] || { echo "tooling: $1 is not in the git tree of $r" >> "$broken"; return 0; }
+    mkdir -p "$(dirname "$2")"
+    if gh api "repos/$OWNER/$r/git/blobs/$sha" -H 'Accept: application/vnd.github.raw' </dev/null >"$2" 2>"$broken.last"; then :
+    elif grep -q 'HTTP 403' "$broken.last"; then rm -f "$2"; echo "$1" >> "$tooldir/.audit/unreadable"
+    else echo "gh api git/blobs/$sha ($1, $r): $(head -1 "$broken.last")" >> "$broken"; fi
   }
   excepted() { jq -e --arg c "$1" '.exceptions | index($c)' <<<"$m" >/dev/null; }
   job_ok() { grep -qE '^    needs:' <<<"$job" && grep -qE '^    if: (\$\{\{ *)?always\(\)' <<<"$job"; }
@@ -339,16 +376,33 @@ gh_paths=$(gh api "repos/$OWNER/.github/git/trees/main?recursive=1" -q '.tree[].
       && { grep -qE 'environment: *pypi' <<<"$1" || grep -A2 'environment:' <<<"$1" | grep -qE 'name: *pypi'; } \
       && grep -qE '^  release:|releases?_created' <<<"$1" && ! grep -qE 'PYPI_API_TOKEN|UV_PUBLISH_TOKEN|password:|--token' <<<"$1"
   }
+  # a key the token cannot read is null: unknown, unless another key really differs (drift wins)
   setting() { # id key...
-    local id=$1 d="" k want got; shift
+    local id=$1 d="" u="" k want got; shift
     for k; do
-      want=$(jq -r --arg k "$k" '.[$k]' <<<"$std"); got=$(jq -r --arg k "$k" '.[$k]' <<<"$s")
+      want=$(jq -r --arg k "$k" '.[$k]' <<<"$std")
+      if jq -e --arg k "$k" '.[$k] == null' <<<"$s" >/dev/null; then u+="$k: cannot read; "; continue; fi
+      got=$(jq -r --arg k "$k" '.[$k]' <<<"$s")
       [ "$want" = "$got" ] || d+="$k: $got (want $want); "
     done
-    chk "$id" standard "$(ok test -z "$d")" "${d%; }"
+    if [ -n "$d" ]; then chk "$id" standard fail "${d%; }"
+    elif [ -n "$u" ]; then chk "$id" standard unknown "${u%; }"
+    else chk "$id" standard pass; fi
+  }
+  # a feature behind its own endpoint: 404 is disabled (drift), any other failure (a 403: the token cannot read it) is
+  # unknown. $3 is a jq filter for the enabled flag, empty when HTTP 204 means enabled.
+  probe() { # id endpoint jq-filter disabled-detail
+    local out
+    if out=$(gh api "repos/$OWNER/$r/$2" ${3:+-q "$3"} </dev/null 2>"$broken.last"); then
+      if [ -z "$3" ] || [ "$out" = true ]; then chk "$1" standard pass
+      elif [ "$out" = false ]; then chk "$1" standard fail "$4"
+      else chk "$1" standard unknown "cannot read: unexpected response"; fi
+    elif grep -q 'HTTP 404' "$broken.last"; then chk "$1" standard fail "$4"
+    else chk "$1" standard unknown "cannot read: $(head -1 "$broken.last")"; fi
   }
 }
 
+TOOLING=${TOOLING:-$DIR/scripts/tooling.py} # tests point it at a stub
 drift=0
 results=""
 for r in "${repos[@]}"; do
@@ -392,7 +446,7 @@ for r in "${repos[@]}"; do
     [ -n "$f" ] || continue
     kind=""; [[ $f =~ (^|/)action\.ya?ml$ ]] && kind=--action # the file kind comes from its path, never its content
     hyg+=$(fetch "$f" | wf_findings "$entries" "$kind" | label_lines "${f#.github/workflows/}")$'\n'
-  done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$|^(.*/)?action\.ya?ml$' <<<"$paths")
+  done < <(grep -E "$WF_RE|^(.*/)?action\.ya?ml\$" <<<"$paths")
   broken_exit
   for w in pr-title label-guard todo-issues stale; do
     got=$(awk -v p=".github/workflows/$w.yml" '$3==p{print $2}' <<<"$entries")
@@ -422,8 +476,8 @@ for r in "${repos[@]}"; do
   chk no_claude_md standard "$(ok no_claude_md)" "tracked CLAUDE.md: Claude Code then skips AGENTS.md (sync.sh apply claude-md)"
   setting squash_only allow_squash_merge allow_merge_commit allow_rebase_merge squash_merge_commit_title squash_merge_commit_message
   setting delete_branch delete_branch_on_merge
-  chk dependabot_alerts standard "$(ok gh api "repos/$OWNER/$r/vulnerability-alerts" --silent 2>/dev/null)" "Dependabot alerts disabled"
-  chk dependabot_security_updates standard "$(gh api "repos/$OWNER/$r/automated-security-fixes" -q .enabled 2>/dev/null || echo false)" "Dependabot security updates disabled"
+  probe dependabot_alerts vulnerability-alerts "" "Dependabot alerts disabled"
+  probe dependabot_security_updates automated-security-fixes .enabled "Dependabot security updates disabled"
   if [ "$priv" = true ]; then ex+="auto_merge ruleset_main secret_scanning vuln_reporting " # free plan: unavailable
   else
     setting auto_merge allow_auto_merge
@@ -438,9 +492,13 @@ for r in "${repos[@]}"; do
         chk ruleset_main standard "$(ok test -z "$miss")" "ruleset main: missing required checks $miss"
       fi
     fi
+    if [ "$(jq '.security_and_analysis == null' <<<"$s")" = true ]; then
+      chk secret_scanning standard unknown "security_and_analysis: cannot read" # needs admin read
+    else
     d=$(jq -r '.security_and_analysis // {} | [("secret_scanning","secret_scanning_push_protection") as $k | select(.[$k].status != "enabled") | "\($k): \(.[$k].status // "n/a") (want enabled)"] | join("; ")' <<<"$s")
     chk secret_scanning standard "$(ok test -z "$d")" "$d"
-    chk vuln_reporting standard "$(gh api "repos/$OWNER/$r/private-vulnerability-reporting" -q .enabled 2>/dev/null || echo false)" "private vulnerability reporting disabled"
+    fi
+    probe vuln_reporting private-vulnerability-reporting .enabled "private vulnerability reporting disabled"
   fi
   have=$(gh label list -R "$OWNER/$r" --limit 200 --json name -q '.[].name')
   extra=$(raw .github/labels.yaml | label_names) # the repo's own extras; one the standard defines is a conflict
@@ -498,9 +556,9 @@ for r in "${repos[@]}"; do
         c=$(raw "$f")
         while IFS= read -r j; do [ -n "$j" ] && d+="$f job $j has no environment; "; done < <(unenv_jobs <<<"$c")
         pypi_wf_ok "$c" && pypi_ok=true
-      done < <(grep -E '^\.github/workflows/[^/]+\.ya?ml$' <<<"$paths")
+      done < <(grep -E "$WF_RE" <<<"$paths")
       # a failed call is a broken run, not an empty secret list that passes `environments`
-      secs=$(gh api "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' </dev/null 2>"$broken.last") \
+      secs=$(gh api --paginate "repos/$OWNER/$r/actions/secrets" -q '.secrets[].name' </dev/null 2>"$broken.last") \
         || { echo "gh api actions/secrets ($r): $(head -1 "$broken.last")" >> "$broken"; broken_exit; }
       while IFS= read -r sec; do d+="repository secret $sec (use an environment secret); "; done \
         < <(grep -E 'PYPI|DEPLOY|PORTAINER|WEBHOOK|SSH|REGISTRY|DOCKER' <<<"$secs" || true)
@@ -518,15 +576,47 @@ for r in "${repos[@]}"; do
   chk changelog extra "$(ok has '(.*/)?CHANGELOG\.md')"
   chk docs_site extra "$(jq -r '.has_pages or ((.homepage // "") != "")' <<<"$s")"
 
+  # tooling inventory (scripts/tooling.py): fetch the files it wants by blob sha, then collect the cells
+  tooldir=$(mktemp -d); mkdir "$tooldir/.audit"
+  printf '%s\n' "$paths" > "$tooldir/.audit/paths"
+  tooling_run() {
+    [ -f "$TOOLING.lock" ] || { echo "$TOOLING.lock missing" >&2; return 3; }
+    uv run --quiet --script --locked "$TOOLING" "$@"
+  }
+  if wanted=$(tooling_run wanted < "$tooldir/.audit/paths"); then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      case "/$f/" in
+        */../*|//*|/.audit/*) echo "tooling: refusing path $f in $r" >> "$broken"; continue ;;
+      esac
+      fetch_file "$f" "$tooldir/$f"
+    done <<<"$wanted"
+  else echo "scripts/tooling.py wanted failed (exit $?) for $r" >> "$broken"; fi
+  broken_exit
+  tooling=$(tooling_run collect --repo "$r" --type "$type" --released "$released" --config "$DIR/standard/tooling.json" "$tooldir") || tooling=
+  jq -e 'type == "object"' <<<"$tooling" >/dev/null 2>&1 || { echo "scripts/tooling.py collect failed for $r" >> "$broken"; broken_exit; }
+  rm -rf "$tooldir"; tooldir=
+  tfails=$(jq -r 'to_entries[] | select(.value.severity == "fail" and (.value.status == "differs" or .value.status == "absent"))
+    | "tooling \(.key): \(.value.value)" + (if .value.expected == null then "" else " (want \(.value.expected))" end)' <<<"$tooling")
+  twarns=$(jq -r 'to_entries[] | select(.value.severity == "warn" and (.value.status == "differs" or .value.status == "absent"))
+    | "warn tooling \(.key): \(.value.value)" + (if .value.expected == null then "" else " (want \(.value.expected))" end)' <<<"$tooling")
+
   broken_exit # a failed fetch above is a broken run, never drift
-  fails=$(awk -F'\t' '$2!="extra" && $3=="false" {print $1": "$4}' <<<"$rec")
-  if [ -z "$fails" ]; then echo "ok    $r"; else drift=1; echo "DRIFT $r"; while IFS= read -r l; do printf '        %s\n' "$l"; done <<<"$fails"; fi
-  results+=$(jq -n --arg repo "$r" --arg type "$type" --argjson released "$released" --argjson private "$priv" --arg ex "$ex" --arg rec "$rec" '
-    [$rec | split("\n")[] | select(length > 0) | split("\t") | {id: .[0], kind: .[1], pass: (.[2] == "true"), detail: .[3]}] as $all
+  fails=$(awk -F'\t' '$2!="extra" && $3=="fail" {print $1": "$4}' <<<"$rec")
+  unknowns=$(awk -F'\t' '$2!="extra" && $3=="unknown" {print "unknown "$1": "$4}' <<<"$rec")
+  [ -z "$tfails" ] || fails+=${fails:+$'\n'}$tfails
+  if [ -n "$fails" ]; then drift=1; echo "DRIFT $r"
+  elif [ -n "$unknowns" ]; then echo "UNKNOWN $r"
+  else echo "ok    $r"; fi
+  while IFS= read -r l; do [ -z "$l" ] || printf '        %s\n' "$l"; done <<<"$fails"$'\n'"$unknowns"$'\n'"$twarns"
+  results+=$(jq -n --arg repo "$r" --arg type "$type" --argjson released "$released" --argjson private "$priv" --arg ex "$ex" --arg rec "$rec" --argjson tooling "$tooling" '
+    [$rec | split("\n")[] | select(length > 0) | split("\t") | {id: .[0], kind: .[1], status: .[2], pass: (.[2] == "pass"), detail: .[3]}] as $all
     | ($all | map(select(.kind != "extra"))) as $c | ($all | map(select(.kind == "extra"))) as $e
-    | def score(k): ($c | map(select(.kind == k))) | "\(map(select(.pass)) | length)/\(length)";
+    | def score(k): ($c | map(select(.kind == k and .status != "unknown"))) | "\(map(select(.pass)) | length)/\(length)";
     {repo: $repo, type: $type, released: $released, private: $private, exempt: ($ex | split(" ") | map(select(length > 0))),
-     checks: ($c | map({(.id): ({kind, pass} + if .pass or .detail == "" then {} else {detail} end)}) | add // {}),
+     unknown: ($c | map(select(.status == "unknown")) | length),
+     checks: ($c | map({(.id): ({kind, pass, status} + if .pass or .detail == "" then {} else {detail} end)}) | add // {}),
+     tooling: $tooling,
      extras: ($e | map({(.id): {kind, present: .pass}}) | add // {}),
      score: {standard: score("standard"), typed: score("typed"), extras: "\($e | map(select(.pass)) | length)/\($e | length)"}}')$'\n'
 done

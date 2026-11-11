@@ -1,0 +1,12 @@
+# a ${{ with no closing }} outside a string makes the file unreadable; expected: expr-unterminated.out
+on: push
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "ci-${{ github.run_id "
+    steps:
+      - run: echo

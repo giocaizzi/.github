@@ -13,4 +13,5 @@ Gotchas
 - Never apply the ruleset to a repo that lacks a `check` job: it blocks every merge.
 - Every repo needs exactly one `std-<type>` topic; the audit fails it otherwise.
 - The workflow checker is `scripts/workflow.py` (uv, `ruamel.yaml` pinned in its header); after changing that pin, run `uv lock --script scripts/workflow.py`. `scripts/workflow.awk` only blanks or replaces refs (text modes).
+- The tooling inventory is `scripts/tooling.py` (same pin and lock rule: `uv lock --script scripts/tooling.py`), configured by `standard/tooling.json` ([docs/tooling.md](docs/tooling.md)); everything stays `info` unless raised there. `scripts/report.py` renders `audit.json` into the drift issue body; refresh its fixtures with `REGEN=1 scripts/test-report.sh`.
 - This repo is public: never name a private repo or include private data in files, issues, PRs or artifacts here.

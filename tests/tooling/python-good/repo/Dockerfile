@@ -1,0 +1,2 @@
+FROM python:3.14-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS build
+FROM build

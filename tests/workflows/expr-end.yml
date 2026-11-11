@@ -1,0 +1,40 @@
+# an expression ends at the first }} outside a single-quoted string, as the runner reads it; expected: expr-end.out
+on: push
+permissions:
+  contents: read
+jobs:
+  quoted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ '}}${{ github.run_id }}' }}"
+    steps:
+      - run: echo
+  quotedreal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ '}}' }}-${{ github.run_id }}"
+    steps:
+      - run: echo
+  escaped:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ 'it''s }}' }}-${{ github.run_id }}"
+    steps:
+      - run: echo
+  escapedonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ 'it''s ${{ github.run_id }}' }}"
+    steps:
+      - run: echo
+  plain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: "${{ github.run_id }}"
+    steps:
+      - run: echo

@@ -1,0 +1,119 @@
+# constant timeout-minutes expressions fail, non-constant ones pass; expected: timeout-const.out
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  # false && github
+  t1:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ false && github }}
+    steps:
+      - run: echo
+  # true || github.x
+  t2:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ true || github.x }}
+    steps:
+      - run: echo
+  # TRUE
+  t3:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ TRUE }}
+    steps:
+      - run: echo
+  # NULL
+  t4:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ NULL }}
+    steps:
+      - run: echo
+  # !false
+  t5:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ !false }}
+    steps:
+      - run: echo
+  # format('{0}', 5)
+  t6:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ format('{0}', 5) }}
+    steps:
+      - run: echo
+  # inputs.timeout
+  t7:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout }}
+    steps:
+      - run: echo
+  # github.event_name == 'push' && 30 || 10
+  t8:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'push' && 30 || 10 }}
+    steps:
+      - run: echo
+  # inputs.a || 5
+  t9:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.a || 5 }}
+    steps:
+      - run: echo
+  # contains(github.ref, 'x') && 3 || 4
+  t10:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ contains(github.ref, 'x') && 3 || 4 }}
+    steps:
+      - run: echo
+  # fromJSON(inputs.t)
+  t11:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.t) }}
+    steps:
+      - run: echo
+  # success()
+  t12:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ success() }}
+    steps:
+      - run: echo
+  # hashFiles(1)
+  t13:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ hashFiles(1) }}
+    steps:
+      - run: echo
+  # matrix.t[0]
+  t14:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.t[0] }}
+    steps:
+      - run: echo
+  # github.x.*
+  t15:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.x.* }}
+    steps:
+      - run: echo
+  # '}}' && github.x
+  t16:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ '}}' && github.x }}
+    steps:
+      - run: echo
+  # 1 +
+  t17:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 1 + }}
+    steps:
+      - run: echo
+  # (
+  t18:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ ( }}
+    steps:
+      - run: echo
+  # 'it''s inputs.x'
+  t19:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ 'it''s inputs.x' }}
+    steps:
+      - run: echo

@@ -1,0 +1,10 @@
+# a ${{ whose }} sits inside an unclosed string is unterminated too; expected: expr-unterminated-string.out
+on: push
+permissions:
+  contents: read
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    timeout-minutes: "${{ '}}' "
+    steps:
+      - run: echo
