@@ -13,6 +13,10 @@
 - {name: P3, color: fbca04, description: "Nice to have"}
 # Cross-cutting
 - {name: parity, color: 0e8a16, description: "Gap between harnesses (Claude Code, Copilot CLI) or hosts (macOS, Linux, Windows)"}
+# Stale handling (stale workflow)
+- {name: keep, color: 0e8a16, description: "Never closed as stale"}
+- {name: security, color: b60205, description: "Security issue or fix; never closed as stale"}
+- {name: stale, color: ededed, description: "No activity; closes unless updated (stale workflow)"}
 # Automation (Dependabot, release-please, todo-issues workflow)
 - {name: dependencies, color: 0366d6, description: "Pull requests that update a dependency file"}
 - {name: github_actions, color: "000000", description: "Pull requests that update GitHub Actions code"}
