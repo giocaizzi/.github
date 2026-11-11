@@ -1,0 +1,1 @@
+{ "checks": { "python_version": { "severity": "warn", "expected": ">=3.12" }, "python_pm": { "severity": "warn" } } }

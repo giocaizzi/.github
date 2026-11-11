@@ -1,0 +1,5 @@
+.github/workflows/ci.yml
+.golangci-baseline.json
+.golangci.yml
+Makefile
+go.mod

@@ -1,0 +1,9 @@
+{
+  // strict, with a comment and trailing commas
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2024", /* block comment */
+    "url": "https://example.com//not-a-comment",
+    "noUncheckedIndexedAccess": true,
+  },
+}

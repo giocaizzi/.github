@@ -1,0 +1,6 @@
+.github/workflows/ci.yml
+.golangci.yml
+go.mod
+package.json
+pyproject.toml
+uv.lock
