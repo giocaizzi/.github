@@ -27,7 +27,7 @@ test: ## Smoke-test: the audit script parses, the topic parser reads type and fl
 
 check: lint test ## lint + test
 
-prepush: check ## Local gate before marking a PR ready (= check)
+prepush: check ## Optional advisory local gate (= check); not required before marking a PR ready
 
 audit: ## Report drift (read-only); JSON=1 prints JSON on stdout, text on stderr; VISIBILITY=public|private|all (default all)
 	@scripts/sync.sh audit $(if $(JSON),--json) --visibility $(or $(VISIBILITY),all)
